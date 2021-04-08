@@ -52,7 +52,7 @@ def run_command(cmd: str, args: list, nofail=False) -> int:
     echo('EXEC: ', cmd + ' ' + ' '.join(args))
     with open(process['logfile'], 'a') as log:
         log.write("<CommandOutput>\n")
-        gp = subprocess.Popen(' '.join([cmd] + args), shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        p = subprocess.Popen(' '.join([cmd] + args), shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         result = p.wait()
         output, err = p.communicate()
         log.write(output.decode('utf-8'))
