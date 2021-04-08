@@ -36,6 +36,8 @@ List of objects:
 * "mount" - String, path to dir, where device should be mounted. If empty, device will not be mounted. Swap will be mounted in any case, independent from this option.
 * "mount_options" - String, additions options passed to mount. Have no effect on devices with "fs": "swap".
 
+One very important thing! You have to partition your drives by yourselves!
+
 Keep in mind, that all paths in "mount" field have to be passed as they should be in real system.
 
 F.ex for root partition "mount": "/", for ESP "mount": "/boot/efi". **Not** "mount": "/mnt" and "mount": "/mnt/boot/efi"

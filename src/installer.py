@@ -52,14 +52,14 @@ def run_command(cmd: str, args: list, nofail=False) -> int:
     echo('EXEC: ', cmd + ' ' + ' '.join(args))
     with open(process['logfile'], 'a') as log:
         log.write("<CommandOutput>\n")
-        #p = subprocess.Popen(' '.join([cmd] + args), shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        #result = p.wait()
-        #output, err = p.communicate()
-        #log.write(output.decode('utf-8'))
-        #log.write("\n<Error>\n"+err.decode('utf-8')+"</Error>\n")
-        #if err:
-        #    print(err.decode('utf-8'))
-        result = 0
+        gp = subprocess.Popen(' '.join([cmd] + args), shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        result = p.wait()
+        output, err = p.communicate()
+        log.write(output.decode('utf-8'))
+        log.write("\n<Error>\n"+err.decode('utf-8')+"</Error>\n")
+        if err:
+            print(err.decode('utf-8'))
+        #result = 0
         log.write("\n</CommandOutput>\n")
     if not nofail and result != 0:
         raise Exception('  ' * process['log_depth'] + "Command Error!")
