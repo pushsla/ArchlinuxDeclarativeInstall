@@ -1,0 +1,65 @@
+{
+  "hardware": {
+    "partitions": [
+      {
+        "dev": "/dev/nvme0n1p1",
+        "fs": "",
+        "fs_options": "",
+        "mount": "/boot/efi",
+        "mount_options": ""
+      },
+      {
+        "dev": "/dev/nvme0n1p7",
+        "fs": "f2fs",
+        "fs_options": "",
+        "mount": "/",
+        "mount_options": ""
+      },
+      {
+        "dev": "/dev/nvme0n1p8",
+        "fs": "swap",
+        "fs_options": "",
+        "mount": "",
+        "mount_options": ""
+      },
+      {
+        "dev": "/dev/sda3",
+        "fs": "ext4",
+        "fs_options": "",
+        "mount": "/tmp",
+        "mount_options": ""
+      }
+    ]
+  },
+  "packages": [
+    "base", "base-devel", "zsh", "zsh-syntax-highlighting", "git", "pkgfile", "linux-firmware"
+  ],
+  "system": {
+    "kernel": "linux-zen",
+    "initram": "booster",
+    "ucode": "amd-ucode",
+    "bootloader": {
+      "efistub": true,
+      "efistub_dir": "/boot/efi/efi/Linux/",
+      "used_bootloader": "refind",
+      "install_bootloader": true
+    },
+    "systemd": {
+      "timezone": "Europe/Moscow",
+      "ntp": "true",
+      "hostname": "madArch",
+      "locales" : ["ru_RU.UTF-8","en_US.UTF-8"],
+      "main_locale": "ru_RU.UTF-8"
+    },
+    "dm": "sddm",
+    "desktop": "plasma",
+    "users": [
+      {
+        "name": "psycho",
+        "groups": ["users","wheel","video","lp"],
+        "shell": "/bin/zsh",
+        "home": true
+      }
+    ]
+  }
+}
