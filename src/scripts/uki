@@ -66,7 +66,7 @@ for kernel_data in options['configData']['system']['kernels']:
 
     if not (Path(kernelpath).is_file() and Path(initrampath).is_file()):
         print("Can not find kernel {} or initramfs {}".format(kernelpath, initrampath))
-        exit(1)
+        continue
 
     if ucodepath:
         newinitrampath = '.'.join(initrampath.split('.')[:-1])+"-"+ucode+".img"
