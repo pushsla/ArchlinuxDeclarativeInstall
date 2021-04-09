@@ -11,6 +11,8 @@ process = {
     'log_depth': 0,
     'satisfied': True,
     'first_setup': 'configure_filesystems',
+    'pkgbuild_ready': False,
+    'pacman_refreshed': False,
     'setup_chain': [
         'configure_filesystems',
         'install_world',
@@ -29,7 +31,6 @@ options = {
     'root_uuid': "",
     'installed_system_scripts': [],
     'use_uki': False,
-    'pkgbuild_ready': False,
     'params': [],
     'arguments': [],
     'configFile': "worldconfig.json",
@@ -99,12 +100,28 @@ def run_setup(function: run_command, *args, required=True, **kwargs):
     process['log_depth'] -= 1
 
 
-def install_pkgbuild(package_name: str) -> bool:
-    raise Exception("Not implemented!")
+def install_pacstrap(packages: list) -> bool:
+    if not process['pacman_refreshed']:
+        run_command('pacman', ['-Sy'])
+        process['pacman_refreshed'] = True
 
-    if not options['pkgbuild_ready']:
-        run_command('pacman', ['-S', '--noconfirm', 'git'])
-        options['pkgbuild_ready'] = True
+    run_command('pacstrap', [options['install']] + packages)
+    return True
+
+
+def install_local_pacman(packages: list) -> bool:
+    if not process['pacman_refreshed']:
+        run_command('pacman', ['-Sy'])
+        process['pacman_refreshed'] = True
+
+    run_command('pacman', ['-S', '--noconfirm']+packages)
+    return True
+
+
+def install_pkgbuild(package_name: str) -> bool:
+    if not process['pkgbuild_ready']:
+        install_local_pacman(['git'])
+        process['pkgbuild_ready'] = True
 
     run_command('mkdir', ['-p', '/tmp/adi/build/'])
     run_command('mkdir', ['-p', options['install']+'/tmp/adi/build/'])
@@ -207,17 +224,19 @@ def configure_filesystems() -> bool:
 
 def install_world() -> bool:
     run_command('pacman', ['-Sy'])
-    run_command('pacstrap', [options['install']] + options['configData']['packages'])
+    install_pacstrap(options['configData']['packages'])
 
     if options['configData']['system']['bootloader']['install_bootloader']:
-        run_command('pacstrap', [options['install'], options['configData']['system']['bootloader']['used_bootloader']])
+        install_pacstrap([options['configData']['system']['bootloader']['used_bootloader']])
     return True
 
 
 def install_kernel() -> bool:
-    run_command('pacstrap', [options['install'], options['configData']['system']['initram']])
-    run_command('pacstrap', [options['install'], options['configData']['system']['kernel'],
-                             options['configData']['system']['ucode']])
+    install_pacstrap([
+        options['configData']['system']['initram'],
+        options['configData']['system']['kernel'],
+        options['configData']['system']['ucode']
+    ])
     return True
 
 
@@ -250,8 +269,7 @@ def configure_userspace() -> bool:
         echo("Configure {}`s password (safe UNIX passwd command used. Enter password Twice!):".format(user['name']))
         run_chroot('passwd', [user['name']])
 
-    run_command('pacstrap',
-                [options['install'], options['configData']['system']['desktop'], options['configData']['system']['dm']])
+    install_pacstrap([options['configData']['system']['desktop'], options['configData']['system']['dm']])
     run_chroot('systemctl', ['enable', options['configData']['system']['dm']])
 
     if read('Would you like to use HFP/HSP headphones with bluetooth,pulseaudio and ofono? [N/y]') in ('Y', 'y'):
