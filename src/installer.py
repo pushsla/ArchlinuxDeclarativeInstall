@@ -21,15 +21,18 @@ process = {
         'configure_world',
         'configure_boot',
         'save_configuration',
-        'scripts'
+        'scripts',
+        'script_packages'
     ],
     'needed_system_scripts': [],
+    'needed_script_packages': [],
 }
 
 options = {
     'install': "/mntarch",
     'root_uuid': "",
     'installed_system_scripts': [],
+    'installed_script_packages': [],
     'use_uki': False,
     'params': [],
     'arguments': [],
@@ -370,6 +373,8 @@ def scripts() -> bool:
 
 
 def script_booster_efistub() -> bool:
+    process['needed_script_packages'] += ['python', 'binutils', 'systemd']
+
     run_command('mkdir', ['-p', options['install']+"/usr/local/share/adi/scripts"])
     run_command('mkdir', ['-p', options['install'] + "/etc/pacman.d/hooks"])
     run_command('cp', ['-f', 'hooks/99-adi-efistub.hook', options['install']+"/etc/pacman.d/hooks/"])
@@ -380,6 +385,13 @@ def script_booster_efistub() -> bool:
 
 def script_hfp_ofono() -> bool:
     echo("Sorry! Not implemented yet! I have troubles with PKGBUILDing.")
+    return True
+
+
+def script_packages() -> bool:
+    packages = list(set(process['needed_script_packages']) - set(options['configData']['packages']))
+    install_pacstrap(packages)
+    options['installed_script_packages'] += packages
     return True
 
 
