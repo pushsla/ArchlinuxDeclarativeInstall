@@ -2,6 +2,15 @@
 import json
 import subprocess
 from pathlib import Path
+import re
+
+targets = []
+
+while line := input():
+    if re.match(r'usr/lib/modules/([^/])+/(pkgbase|vmlinuz)', line):
+        kver = line.split('/')[3]
+        kver = '-'+ksplit[3] if len(ksplit := kver.split('-')) == 4 else ''
+        targets.append('linux'+kver)
 
 
 supported_initrams = {
@@ -60,27 +69,28 @@ else:
 
 for kernel_data in options['configData']['system']['kernels']:
     kernel = kernel_data['version']
-    kernelpath = kernelpath_f(kernel)
-    initrampath = initrampath_f(kernel)
-    ucodepath = ucodepath_f
+    if kernel in targets:
+        kernelpath = kernelpath_f(kernel)
+        initrampath = initrampath_f(kernel)
+        ucodepath = ucodepath_f
 
-    if not (Path(kernelpath).is_file() and Path(initrampath).is_file()):
-        print("Can not find kernel {} or initramfs {}".format(kernelpath, initrampath))
-        continue
+        if not (Path(kernelpath).is_file() and Path(initrampath).is_file()):
+            print("Can not find kernel {} or initramfs {}".format(kernelpath, initrampath))
+            continue
 
-    if ucodepath:
-        newinitrampath = '.'.join(initrampath.split('.')[:-1])+"-"+ucode+".img"
-        run_command('cat', [ucodepath, initrampath, '>', newinitrampath])
-        initrampath = newinitrampath
+        if ucodepath:
+            newinitrampath = '.'.join(initrampath.split('.')[:-1])+"-"+ucode+".img"
+            run_command('cat', [ucodepath, initrampath, '>', newinitrampath])
+            initrampath = newinitrampath
 
-    uki_params = [
-        '--add-section .osrel="/usr/lib/os-release" --change-section-vma .osrel=0x20000',
-        '--add-section .cmdline="/etc/kernel/cmdline-{}" --change-section-vma .cmdline=0x30000'.format(kernel),
-        '--add-section .linux="{}" --change-section-vma .linux=0x2000000'.format(kernelpath),
-        '--add-section .initrd="{}" --change-section-vma .initrd=0x3000000'.format(initrampath),
-        '"/usr/lib/systemd/boot/efi/linuxx64.efi.stub" "{}{}.efi"'.format(ukipath, kernel)
-    ]
+        uki_params = [
+            '--add-section .osrel="/usr/lib/os-release" --change-section-vma .osrel=0x20000',
+            '--add-section .cmdline="/etc/kernel/cmdline-{}" --change-section-vma .cmdline=0x30000'.format(kernel),
+            '--add-section .linux="{}" --change-section-vma .linux=0x2000000'.format(kernelpath),
+            '--add-section .initrd="{}" --change-section-vma .initrd=0x3000000'.format(initrampath),
+            '"/usr/lib/systemd/boot/efi/linuxx64.efi.stub" "{}/{}.efi"'.format(ukipath, kernel)
+        ]
 
-    run_command('mkdir', ['-p', ukipath])
-    run_command('rm', ['-f', ukipath+'/'+kernel+'.efi'], nofail=True)
-    run_command('objcopy', uki_params)
+        run_command('mkdir', ['-p', ukipath])
+        run_command('rm', ['-f', ukipath+'/'+kernel+'.efi'], nofail=True)
+        run_command('objcopy', uki_params)
