@@ -33,7 +33,6 @@ options = {
     'root_uuid': "",
     'installed_system_scripts': [],
     'installed_script_packages': [],
-    'use_uki': False,
     'params': [],
     'arguments': [],
     'configFile': "worldconfig.json",
@@ -237,9 +236,9 @@ def install_world() -> bool:
 def install_kernel() -> bool:
     install_pacstrap([
         options['configData']['system']['initram'],
-        options['configData']['system']['kernel'],
         options['configData']['system']['ucode']
-    ])
+    ]+[k['version'] for k in options['configData']['system']['kernels']]
+    )
     return True
 
 
@@ -303,38 +302,31 @@ def configure_boot() -> bool:
     return True
 
 
-def boot_efistub(kernel: str, initram: str, ucode: str = None) -> bool:
-    echo("Currently supported EFISTUB types: UnifiedKernelImage")
+def uki_efistub(kernel: str, kernelpath: str, cmdline: str, initram: str, ucode: str = None) -> bool:
     system = options['configData']['system']
     bootloader = system['bootloader']
 
-    run_command('mkdir', ['-p', options['install'] + bootloader['efistub_dir']])
-
-    if read('Would you like to create Unified Kernel image? [Y/n]') in ('Y', 'y', ''):
-        options['use_uki'] = True
-        cmdline = read("Specify kernel cmdline parameters (dont leave empty! 'rw' and 'root=' required!): ")
-        run_chroot('echo',
-                   ['\"{}\"'.format(cmdline), '>', options['install'] + '/etc/kernel/cmdline-' + system['kernel']])
+    if bootloader['uki']['use_uki']:
+        run_command('mkdir', ['-p', options['install'] + bootloader['uki']['gen_dest']])
+        run_chroot('echo', ['\"{}\"'.format(cmdline), '>', options['install'] + '/etc/kernel/cmdline-' + kernel])
 
         if ucode:
             run_chroot('cat', [ucode, initram, '>', ''.join(initram.split('.')[:-1]) + "-" + system['ucode'] + '.img'])
             ucode = ''.join(initram.split('.')[:-1]) + "-" + system['ucode'] + '.img'
+            ukipath = bootloader['uki']['gen_dest'] + "/" + kernel + ".efi"
 
         uki_params = [
             '--add-section .osrel="/usr/lib/os-release" --change-section-vma .osrel=0x20000',
-            '--add-section .cmdline="/etc/kernel/cmdline-{}" --change-section-vma .cmdline=0x30000'.format(
-                system['kernel']),
-            '--add-section .linux="{}" --change-section-vma .linux=0x2000000'.format(kernel),
+            '--add-section .cmdline="/etc/kernel/cmdline-{}" --change-section-vma .cmdline=0x30000'.format(kernel),
+            '--add-section .linux="{}" --change-section-vma .linux=0x2000000'.format(kernelpath),
             '--add-section .initrd="{}" --change-section-vma .initrd=0x3000000'.format(initram),
-            '"/usr/lib/systemd/boot/efi/linuxx64.efi.stub" "{}{}.efi"'.format(bootloader['efistub_dir'],
-                                                                              system['kernel'])
+            '"/usr/lib/systemd/boot/efi/linuxx64.efi.stub" "{}"'.format(ukipath)
         ]
 
-        run_chroot('rm', [bootloader['efistub_dir'] + "/" + system['kernel'] + ".efi"], nofail=True)
+        run_chroot('rm', [ukipath], nofail=True)
         run_chroot('objcopy', uki_params)
-        if read('Would you like to add alpm hook to generate UKI every time like now? [Y/n]') in ('Y', 'y', ''):
-            echo("Ok! All scripts will be added t the end of installation.")
-            process['needed_system_scripts'].append(script_booster_efistub.__name__)
+        if bootloader['uki']['add_hook']:
+            process['needed_system_scripts'].append(script_booster_uki.__name__)
     else:
         echo("Its OK, but I can only do unified kernel image trick. You have to configure EFISTUB manually then...")
 
@@ -344,13 +336,16 @@ def boot_efistub(kernel: str, initram: str, ucode: str = None) -> bool:
 def boot_booster() -> bool:
     system = options['configData']['system']
     run_chroot('/usr/share/libalpm/scripts/booster-install', ['<<<', "usr/lib/modules/$(uname -r)/vmlinuz"])
-    if system['bootloader']['efistub']:
-        if system['ucode']:
-            run_setup(boot_efistub, "/boot/vmlinuz-" + system['kernel'],
-                      '/boot/booster-{}.img'.format(system['kernel']), ucode="/boot/" + system['ucode'] + '.img')
-        else:
-            run_setup(boot_efistub, "/boot/vmlinuz-" + system['kernel'],
-                      '/boot/booster-{}.img'.format(system['kernel']))
+    ucodepath = "/boot/" + system['ucode'] + '.img' if system['ucode'] else None
+
+    if system['bootloader']['uki']['use_uki']:
+        for kern in system['kernels']:
+            run_setup(uki_efistub,
+                      kern['version'],
+                      "/boot/vmlinuz-"+kern['version'],
+                      kern['cmdline'],
+                      '/boot/booster-{}.img'.format(kern['version']),
+                      ucode=ucodepath)
     return True
 
 
@@ -372,14 +367,14 @@ def scripts() -> bool:
     return True
 
 
-def script_booster_efistub() -> bool:
+def script_booster_uki() -> bool:
     process['needed_script_packages'] += ['python', 'binutils', 'systemd']
 
     run_command('mkdir', ['-p', options['install']+"/usr/local/share/adi/scripts"])
     run_command('mkdir', ['-p', options['install'] + "/etc/pacman.d/hooks"])
-    run_command('cp', ['-f', 'hooks/99-adi-efistub.hook', options['install']+"/etc/pacman.d/hooks/"])
-    run_command('cp', ['-f', 'scripts/efistub', options['install'] + "/usr/local/share/adi/scripts/"])
-    run_command('chmod', ['+x', options['install'] + "/usr/local/share/adi/scripts/efistub"])
+    run_command('cp', ['-f', 'hooks/99-adi-uki.hook', options['install']+"/etc/pacman.d/hooks/"])
+    run_command('cp', ['-f', 'scripts/uki', options['install'] + "/usr/local/share/adi/scripts/"])
+    run_command('chmod', ['+x', options['install'] + "/usr/local/share/adi/scripts/uki"])
     return True
 
 

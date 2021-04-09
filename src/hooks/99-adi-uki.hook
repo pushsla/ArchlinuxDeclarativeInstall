@@ -7,9 +7,10 @@ Target = usr/lib/booster/*
 Target = usr/lib/booster
 
 [Action]
-Description = Generating Initrd image for kernel with Booster...
+Description = Generating Unified Kernel Image...
 When = PostTransaction
-Exec = /usr/local/share/adi/scripts/booster-efistub
+Exec = /usr/bin/python /usr/local/share/adi/scripts/uki
 Depends = booster
 Depends = binutils
+Depends = python
 NeedsTargets

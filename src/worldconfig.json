@@ -35,12 +35,20 @@
     "base", "base-devel", "zsh", "zsh-syntax-highlighting", "git", "pkgfile", "linux-firmware"
   ],
   "system": {
-    "kernel": "linux-zen",
+    "kernels": [
+      {
+        "version": "linux-zen",
+        "cmdline": "rw root=/dev/nvme0n1p7"
+      }
+    ],
     "initram": "booster",
     "ucode": "amd-ucode",
     "bootloader": {
-      "efistub": true,
-      "efistub_dir": "/boot/efi/efi/Linux/",
+      "uki": {
+        "use_uki": true,
+        "gen_dest": "/boot/efi/efi/Linux",
+        "add_hook": true
+      },
       "used_bootloader": "refind",
       "install_bootloader": true
     },
