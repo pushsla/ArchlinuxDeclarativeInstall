@@ -5,6 +5,7 @@ import getopt
 import subprocess
 import time
 
+
 process = {
     'logfile': 'adi.log',
     'log_depth': 0,
@@ -16,13 +17,19 @@ process = {
         'install_kernel',
         'configure_userspace',
         'configure_world',
-        'configure_boot'
+        'configure_boot',
+        'save_configuration',
+        'scripts'
     ],
+    'needed_system_scripts': [],
 }
 
 options = {
     'install': "/mntarch",
     'root_uuid': "",
+    'installed_system_scripts': [],
+    'use_uki': False,
+    'pkgbuild_ready': False,
     'params': [],
     'arguments': [],
     'configFile': "worldconfig.json",
@@ -46,29 +53,31 @@ def read(prompt: str) -> str:
     return answer
 
 
-def run_command(cmd: str, args: list, nofail=False) -> int:
+def run_command(cmd: str, args: list, nofail=False, direct=False) -> int:
     process['log_depth'] += 1
     args = list(filter(lambda x: x != "", args))
     echo('EXEC: ', cmd + ' ' + ' '.join(args))
-    with open(process['logfile'], 'a') as log:
-        log.write("<CommandOutput>\n")
-        p = subprocess.Popen(' '.join([cmd] + args), shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        result = p.wait()
-        output, err = p.communicate()
-        log.write(output.decode('utf-8'))
-        log.write("\n<Error>\n"+err.decode('utf-8')+"</Error>\n")
-        if err:
-            print(err.decode('utf-8'))
-        #result = 0
-        log.write("\n</CommandOutput>\n")
+    if not direct:
+        with open(process['logfile'], 'a') as log:
+            log.write("<CommandOutput>\n")
+            p = subprocess.Popen(' '.join([cmd] + args), shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            result = p.wait()
+            output, err = p.communicate()
+            log.write(output.decode('utf-8'))
+            log.write("\n<Error>\n"+err.decode('utf-8')+"</Error>\n")
+            if err:
+                print(err.decode('utf-8'))
+            log.write("\n</CommandOutput>\n")
+    else:
+        result = subprocess.Popen(' '.join([cmd] + args), shell=True).wait()
     if not nofail and result != 0:
         raise Exception('  ' * process['log_depth'] + "Command Error!")
     process['log_depth'] -= 1
     return result
 
 
-def run_chroot(cmd: str, args: list, nofail=False) -> (int, str):
-    run_command("arch-chroot", [options['install'], cmd] + args, nofail=nofail)
+def run_chroot(cmd: str, args: list, nofail=False, direct=False) -> (int, str):
+    run_command("arch-chroot", [options['install'], cmd] + args, nofail=nofail, direct=direct)
 
 
 def run_setup(function: run_command, *args, required=True, **kwargs):
@@ -90,9 +99,26 @@ def run_setup(function: run_command, *args, required=True, **kwargs):
     process['log_depth'] -= 1
 
 
+def install_pkgbuild(package_name: str) -> bool:
+    raise Exception("Not implemented!")
+
+    if not options['pkgbuild_ready']:
+        run_command('pacman', ['-S', '--noconfirm', 'git'])
+        options['pkgbuild_ready'] = True
+
+    run_command('mkdir', ['-p', '/tmp/adi/build/'])
+    run_command('mkdir', ['-p', options['install']+'/tmp/adi/build/'])
+    run_command('git', ['clone', "https://aur.archlinux.org/{}.git".format(package_name), '/tmp/adi/build/'])
+    run_command('sudo', ['-u', 'nobody', 'cd', '/tmp/adi/build/'+package_name, '&&', 'makepkg', '-s'])
+    run_command('cp', ['/tmp/adi/build/'+package_name+"*.tar.*", options['install']+'/tmp/adi/build/'])
+    echo("Now you have to run pacman -U <package_name> and then exit the shell")
+    run_chroot('cd', ['/tmp/adi/build/'], direct=True)
+    return True
+
+
 def parse_options(argv: list) -> bool:
     try:
-        options['params'], options['arguments'] = getopt.getopt(argv, "c:i:s:", ['config=', 'install=', 'setup='])
+        options['params'], options['arguments'] = getopt.getopt(argv, "c:i:s:", ['config=', 'install=', 'setup=','scripts='])
     except getopt.GetoptError:
         echo("Invalid option")
 
@@ -104,6 +130,8 @@ def parse_options(argv: list) -> bool:
             options['install'] = arg
         elif opt in ('-s', '--setup'):
             process['first_setup'] = arg
+        elif opt in ('--scripts'):
+            process['needed_system_scripts'] = arg.split(',')
 
     return True
 
@@ -226,6 +254,10 @@ def configure_userspace() -> bool:
                 [options['install'], options['configData']['system']['desktop'], options['configData']['system']['dm']])
     run_chroot('systemctl', ['enable', options['configData']['system']['dm']])
 
+    if read('Would you like to use HFP/HSP headphones with bluetooth,pulseaudio and ofono? [N/y]') in ('Y', 'y'):
+        echo("Ok! All scripts will be added at the end of installation!")
+        process['needed_system_scripts'].append(script_hfp_ofono.__name__)
+
     return True
 
 
@@ -258,6 +290,7 @@ def boot_efistub(kernel: str, initram: str, ucode: str = None) -> bool:
     run_command('mkdir', ['-p', options['install'] + bootloader['efistub_dir']])
 
     if read('Would you like to create Unified Kernel image? [Y/n]') in ('Y', 'y', ''):
+        options['use_uki'] = True
         cmdline = read("Specify kernel cmdline parameters (dont leave empty! 'rw' and 'root=' required!): ")
         run_chroot('echo',
                    ['\"{}\"'.format(cmdline), '>', options['install'] + '/etc/kernel/cmdline-' + system['kernel']])
@@ -276,8 +309,11 @@ def boot_efistub(kernel: str, initram: str, ucode: str = None) -> bool:
                                                                               system['kernel'])
         ]
 
-        run_chroot('rm', [bootloader['efistub_dir'] + "/" + system['kernel'] + ".efi"])
+        run_chroot('rm', [bootloader['efistub_dir'] + "/" + system['kernel'] + ".efi"], nofail=True)
         run_chroot('objcopy', uki_params)
+        if read('Would you like to add alpm hook to generate UKI every time like now? [Y/n]') in ('Y', 'y', ''):
+            echo("Ok! All scripts will be added t the end of installation.")
+            process['needed_system_scripts'].append(script_booster_efistub.__name__)
     else:
         echo("Its OK, but I can only do unified kernel image trick. You have to configure EFISTUB manually then...")
 
@@ -297,7 +333,39 @@ def boot_booster() -> bool:
     return True
 
 
-if __name__ == "main":
+def save_configuration() -> bool:
+    run_command('mkdir', ['-p', '/usr/local/share/adi/'])
+    run_command('mkdir', ['-p', options['install'] + '/usr/local/share/adi/'])
+    run_setup(save_run, '/usr/local/share/adi/your_system.json')
+    run_setup(save_config, '/usr/local/share/adi/your_config.json')
+    run_setup(save_run, options['install'] + '/usr/local/share/adi/your_system.json')
+    run_setup(save_config, options['install'] + '/usr/local/share/adi/your_config.json')
+
+    return True
+
+
+def scripts() -> bool:
+    for script in set(process['needed_system_scripts']):
+        run_setup(eval(script))
+        options['installed_system_scripts'].append(script)
+    return True
+
+
+def script_booster_efistub() -> bool:
+    run_command('mkdir', ['-p', options['install']+"/usr/local/share/adi/scripts"])
+    run_command('mkdir', ['-p', options['install'] + "/etc/pacman.d/hooks"])
+    run_command('cp', ['-f', 'hooks/99-adi-efistub.hook', options['install']+"/etc/pacman.d/hooks/"])
+    run_command('cp', ['-f', 'scripts/efistub', options['install'] + "/usr/local/share/adi/scripts/"])
+    run_command('chmod', ['+x', options['install'] + "/usr/local/share/adi/scripts/efistub"])
+    return True
+
+
+def script_hfp_ofono() -> bool:
+    echo("Sorry! Not implemented yet! I have troubles with PKGBUILDing.")
+    return True
+
+
+if __name__ == "__main__":
     run_setup(parse_options, sys.argv[1:])
     run_setup(read_config)
 

@@ -1,0 +1,15 @@
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Path
+Target = usr/lib/modules/*/vmlinuz
+Target = usr/lib/booster/*
+Target = usr/lib/booster
+
+[Action]
+Description = Generating Initrd image for kernel with Booster...
+When = PostTransaction
+Exec = /usr/local/share/adi/scripts/booster-efistub
+Depends = booster
+Depends = binutils
+NeedsTargets
