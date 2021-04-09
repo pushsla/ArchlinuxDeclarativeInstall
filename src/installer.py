@@ -201,7 +201,6 @@ def configure_filesystems() -> bool:
                 swaps.append(part)
                 mkfs = "mkswap"
             elif not part['fs']:
-                mounts.append(part)
                 continue
             else:
                 mkfs = "mkfs." + part['fs']
@@ -255,7 +254,7 @@ def configure_world() -> bool:
     run_command('genfstab', ["-U", options['install'], '>>', options['install'] + "/etc/fstab"])
 
     echo("Configure ROOT password (safe UNIX passwd command used. Enter password Twice!):")
-    run_chroot('passwd', ['root'])
+    run_chroot('passwd', ['root'], direct=True)
 
     return True
 
@@ -270,7 +269,7 @@ def configure_userspace() -> bool:
         run_chroot('useradd', home + groups + shell + [user['name']], nofail=True)
         if user['password']:
             echo("Configure {}`s password (safe UNIX passwd command used. Enter password Twice!):".format(user['name']))
-            run_chroot('passwd', [user['name']])
+            run_chroot('passwd', [user['name']], direct=True)
 
     install_pacstrap([options['configData']['system']['desktop'], options['configData']['system']['dm']])
     run_chroot('systemctl', ['enable', options['configData']['system']['dm']])
@@ -312,14 +311,14 @@ def uki_efistub(kernel: str, kernelpath: str, cmdline: str, initram: str, ucode:
 
         if ucode:
             run_chroot('cat', [ucode, initram, '>', ''.join(initram.split('.')[:-1]) + "-" + system['ucode'] + '.img'])
-            ucode = ''.join(initram.split('.')[:-1]) + "-" + system['ucode'] + '.img'
+            initram_ucode = ''.join(initram.split('.')[:-1]) + "-" + system['ucode'] + '.img'
             ukipath = bootloader['uki']['gen_dest'] + "/" + kernel + ".efi"
 
         uki_params = [
             '--add-section .osrel="/usr/lib/os-release" --change-section-vma .osrel=0x20000',
             '--add-section .cmdline="/etc/kernel/cmdline-{}" --change-section-vma .cmdline=0x30000'.format(kernel),
             '--add-section .linux="{}" --change-section-vma .linux=0x2000000'.format(kernelpath),
-            '--add-section .initrd="{}" --change-section-vma .initrd=0x3000000'.format(initram),
+            '--add-section .initrd="{}" --change-section-vma .initrd=0x3000000'.format(initram_ucode),
             '"/usr/lib/systemd/boot/efi/linuxx64.efi.stub" "{}"'.format(ukipath)
         ]
 
@@ -335,7 +334,8 @@ def uki_efistub(kernel: str, kernelpath: str, cmdline: str, initram: str, ucode:
 
 def boot_booster() -> bool:
     system = options['configData']['system']
-    run_chroot('/usr/share/libalpm/scripts/booster-install', ['<<<', "usr/lib/modules/$(uname -r)/vmlinuz"])
+    # Not needed because of booster hook
+    #run_chroot('/usr/share/libalpm/scripts/booster-install', ['<<<', "usr/lib/modules/$(uname -r)/vmlinuz"])
     ucodepath = "/boot/" + system['ucode'] + '.img' if system['ucode'] else None
 
     if system['bootloader']['uki']['use_uki']:
