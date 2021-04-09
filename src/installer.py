@@ -268,14 +268,14 @@ def configure_userspace() -> bool:
         shell = ["-s", user['shell']] if user['shell'] else []
 
         run_chroot('useradd', home + groups + shell + [user['name']], nofail=True)
-        echo("Configure {}`s password (safe UNIX passwd command used. Enter password Twice!):".format(user['name']))
-        run_chroot('passwd', [user['name']])
+        if user['password']:
+            echo("Configure {}`s password (safe UNIX passwd command used. Enter password Twice!):".format(user['name']))
+            run_chroot('passwd', [user['name']])
 
     install_pacstrap([options['configData']['system']['desktop'], options['configData']['system']['dm']])
     run_chroot('systemctl', ['enable', options['configData']['system']['dm']])
 
-    if read('Would you like to use HFP/HSP headphones with bluetooth,pulseaudio and ofono? [N/y]') in ('Y', 'y'):
-        echo("Ok! All scripts will be added at the end of installation!")
+    if options['configData']['features']['hfp_ofono']:
         process['needed_system_scripts'].append(script_hfp_ofono.__name__)
 
     return True

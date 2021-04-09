@@ -66,8 +66,12 @@
         "name": "psycho",
         "groups": ["users","wheel","video","lp"],
         "shell": "/bin/zsh",
-        "home": true
+        "home": true,
+        "password": true
       }
     ]
+  },
+  "features": {
+    "hfp_ofono": false
   }
 }
