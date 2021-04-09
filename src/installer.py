@@ -56,31 +56,40 @@ def read(prompt: str) -> str:
     return answer
 
 
-def run_command(cmd: str, args: list, nofail=False, direct=False) -> int:
+def run_command(cmd: str, args: list, nofail=False, direct=False, attempts=1) -> int:
     process['log_depth'] += 1
     args = list(filter(lambda x: x != "", args))
     echo('EXEC: ', cmd + ' ' + ' '.join(args))
-    if not direct:
-        with open(process['logfile'], 'a') as log:
-            log.write("<CommandOutput>\n")
-            p = subprocess.Popen(' '.join([cmd] + args), shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            result = p.wait()
-            output, err = p.communicate()
-            log.write(output.decode('utf-8'))
-            log.write("\n<Error>\n"+err.decode('utf-8')+"</Error>\n")
-            if err:
-                print(err.decode('utf-8'))
-            log.write("\n</CommandOutput>\n")
-    else:
-        result = subprocess.Popen(' '.join([cmd] + args), shell=True).wait()
-    if not nofail and result != 0:
-        raise Exception('  ' * process['log_depth'] + "Command Error!")
+    total_attempts = attempts
+    while True:
+        if not direct:
+            with open(process['logfile'], 'a') as log:
+                log.write("<CommandOutput>\n")
+                p = subprocess.Popen(' '.join([cmd] + args), shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                result = p.wait()
+                output, err = p.communicate()
+                log.write(output.decode('utf-8'))
+                log.write("\n<Error>\n"+err.decode('utf-8')+"</Error>\n")
+                if err:
+                    print(err.decode('utf-8'))
+                log.write("\n</CommandOutput>\n")
+        else:
+            result = subprocess.Popen(' '.join([cmd] + args), shell=True).wait()
+        if result == 0:
+            break
+        elif attempts > 1:
+            echo("Failed {}/{} attempts. Retrying...".format(attempts, total_attempts))
+            attempts -= 1
+        elif not nofail:
+            break
+        else:
+            raise Exception('  ' * process['log_depth'] + "Command Error!")
     process['log_depth'] -= 1
     return result
 
 
-def run_chroot(cmd: str, args: list, nofail=False, direct=False) -> (int, str):
-    run_command("arch-chroot", [options['install'], cmd] + args, nofail=nofail, direct=direct)
+def run_chroot(cmd: str, args: list, nofail=False, direct=False, attempts=1) -> (int, str):
+    run_command("arch-chroot", [options['install'], cmd] + args, nofail=nofail, direct=direct, attempts=attempts)
 
 
 def run_setup(function: run_command, *args, required=True, **kwargs):
@@ -254,7 +263,7 @@ def configure_world() -> bool:
     run_command('genfstab', ["-U", options['install'], '>>', options['install'] + "/etc/fstab"])
 
     echo("Configure ROOT password (safe UNIX passwd command used. Enter password Twice!):")
-    run_chroot('passwd', ['root'], direct=True)
+    run_chroot('passwd', ['root'], direct=True, attempts=2)
 
     return True
 
@@ -269,7 +278,7 @@ def configure_userspace() -> bool:
         run_chroot('useradd', home + groups + shell + [user['name']], nofail=True)
         if user['password']:
             echo("Configure {}`s password (safe UNIX passwd command used. Enter password Twice!):".format(user['name']))
-            run_chroot('passwd', [user['name']], direct=True)
+            run_chroot('passwd', [user['name']], direct=True, attempts=2)
 
     install_pacstrap([options['configData']['system']['desktop'], options['configData']['system']['dm']])
     run_chroot('systemctl', ['enable', options['configData']['system']['dm']])
@@ -307,23 +316,23 @@ def uki_efistub(kernel: str, kernelpath: str, cmdline: str, initram: str, ucode:
 
     if bootloader['uki']['use_uki']:
         run_command('mkdir', ['-p', options['install'] + bootloader['uki']['gen_dest']])
-        run_chroot('echo', ['\"{}\"'.format(cmdline), '>', options['install'] + '/etc/kernel/cmdline-' + kernel])
+        run_command('echo', ['\"{}\"'.format(cmdline), '>', options['install'] + '/etc/kernel/cmdline-' + kernel])
 
         if ucode:
-            run_chroot('cat', [ucode, initram, '>', ''.join(initram.split('.')[:-1]) + "-" + system['ucode'] + '.img'])
+            run_command('cat', [ucode, initram, '>', ''.join(initram.split('.')[:-1]) + "-" + system['ucode'] + '.img'])
             initram_ucode = ''.join(initram.split('.')[:-1]) + "-" + system['ucode'] + '.img'
-            ukipath = bootloader['uki']['gen_dest'] + "/" + kernel + ".efi"
+            ukipath = options['install']+bootloader['uki']['gen_dest'] + "/" + kernel + ".efi"
 
         uki_params = [
-            '--add-section .osrel="/usr/lib/os-release" --change-section-vma .osrel=0x20000',
-            '--add-section .cmdline="/etc/kernel/cmdline-{}" --change-section-vma .cmdline=0x30000'.format(kernel),
+            '--add-section .osrel="{}/usr/lib/os-release" --change-section-vma .osrel=0x20000'.format(options['install']),
+            '--add-section .cmdline="{}/etc/kernel/cmdline-{}" --change-section-vma .cmdline=0x30000'.format(options['install'], kernel),
             '--add-section .linux="{}" --change-section-vma .linux=0x2000000'.format(kernelpath),
             '--add-section .initrd="{}" --change-section-vma .initrd=0x3000000'.format(initram_ucode),
             '"/usr/lib/systemd/boot/efi/linuxx64.efi.stub" "{}"'.format(ukipath)
         ]
 
-        run_chroot('rm', [ukipath], nofail=True)
-        run_chroot('objcopy', uki_params)
+        run_command('rm', [ukipath], nofail=True)
+        run_command('objcopy', uki_params)
         if bootloader['uki']['add_hook']:
             process['needed_system_scripts'].append(script_booster_uki.__name__)
     else:
@@ -336,15 +345,15 @@ def boot_booster() -> bool:
     system = options['configData']['system']
     # Not needed because of booster hook
     #run_chroot('/usr/share/libalpm/scripts/booster-install', ['<<<', "usr/lib/modules/$(uname -r)/vmlinuz"])
-    ucodepath = "/boot/" + system['ucode'] + '.img' if system['ucode'] else None
+    ucodepath = options['install']+"/boot/" + system['ucode'] + '.img' if system['ucode'] else None
 
     if system['bootloader']['uki']['use_uki']:
         for kern in system['kernels']:
             run_setup(uki_efistub,
                       kern['version'],
-                      "/boot/vmlinuz-"+kern['version'],
+                      options['install']+"/boot/vmlinuz-"+kern['version'],
                       kern['cmdline'],
-                      '/boot/booster-{}.img'.format(kern['version']),
+                      options['install']+'/boot/booster-{}.img'.format(kern['version']),
                       ucode=ucodepath)
     return True
 
