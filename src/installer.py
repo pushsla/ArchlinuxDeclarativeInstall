@@ -5,13 +5,13 @@ import getopt
 import subprocess
 import time
 
-supported_bootloaders = {
+_known_bootloaders = {
     'refind': {
         'setup': [('refind-install', [])]  # [setup1, setup2,,,] setup: (command, [*args])
     }
 }
 
-supported_initrams = {
+_known_initrams = {
     'booster': {
         'img': lambda kern: '/boot/booster-' + kern + '.img',
         'kern': lambda kern: '/boot/vmlinuz-' + kern,
@@ -26,12 +26,12 @@ supported_initrams = {
     }
 }
 
-supported_ucodes = {
+_known_ucodes = {
     'intel-ucode': '/boot/intel-ucode.img',
     'amd-ucode': '/boot/amd-ucode.img',
 }
 
-process = {
+_process = {
     'logfile': 'adi.log',
     'log_depth': 0,
     'satisfied': True,
@@ -49,13 +49,12 @@ process = {
         'save_configuration',
         'scripts',
         'script_packages',
-        'setup_devtests',
     ],
     'needed_system_scripts': [],
     'needed_script_packages': [],
 }
 
-options = {
+_options = {
     'install': "/mntarch",
     'root_uuid': "",
     'installed_system_scripts': [],
@@ -66,26 +65,29 @@ options = {
     'configData': {}
 }
 
+_system = _options['configData']['system']
+_bootloader = _system['bootloader']
+
 
 def log(line) -> None:
-    with open(process['logfile'], 'a') as log:
-        log.write('  ' * process['log_depth'] + line + "\n")
+    with open(_process['logfile'], 'a') as log:
+        log.write('  ' * _process['log_depth'] + line + "\n")
 
 
 def echo(*args, **kwargs) -> None:
-    log('  ' * process['log_depth'] + ' '.join(args))
-    print('  ' * process['log_depth'], *args, **kwargs)
+    log('  ' * _process['log_depth'] + ' '.join(args))
+    print('  ' * _process['log_depth'], *args, **kwargs)
 
 
 def read(prompt: str) -> str:
-    answer = input('  ' * process['log_depth'] + prompt)
+    answer = input('  ' * _process['log_depth'] + prompt)
     log(prompt + " " + answer)
     return answer
 
 
 def run_command(cmd: str, args: list, user=None, nofail=False, direct=False, stdin: str = None, timeout=600,
                 attempts=1) -> int:
-    process['log_depth'] += 1
+    _process['log_depth'] += 1
     args = list(filter(lambda x: x != "", args))
     total_attempts = attempts
 
@@ -103,7 +105,7 @@ def run_command(cmd: str, args: list, user=None, nofail=False, direct=False, std
     while True:
         try:
             if not direct:
-                with open(process['logfile'], 'a') as log:
+                with open(_process['logfile'], 'a') as log:
                     log.write("<CommandOutput>\n")
                     p = subprocess.Popen(command, shell=True, stdin=stdin_pipe, stdout=subprocess.PIPE,
                                          stderr=subprocess.PIPE, encoding='utf-8')
@@ -130,15 +132,15 @@ def run_command(cmd: str, args: list, user=None, nofail=False, direct=False, std
         elif nofail:
             break
         else:
-            raise Exception('  ' * process['log_depth'] + "Command Error!")
-    process['log_depth'] -= 1
+            raise Exception('  ' * _process['log_depth'] + "Command Error!")
+    _process['log_depth'] -= 1
     return result
 
 
 def run_chroot(cmd: str, args: list, user=None, **kwargs) -> int:
     if user:
-        return run_command("arch-chroot", [options['install'], 'sudo', '--user=' + user, cmd] + args, **kwargs)
-    return run_command("arch-chroot", [options['install'], cmd] + args, **kwargs)
+        return run_command("arch-chroot", [_options['install'], 'sudo', '--user=' + user, cmd] + args, **kwargs)
+    return run_command("arch-chroot", [_options['install'], cmd] + args, **kwargs)
 
 
 def run_chdir(path: str, cmd: str, args: list, chroot=False, user=None, **kwargs) -> int:
@@ -150,9 +152,9 @@ def run_chdir(path: str, cmd: str, args: list, chroot=False, user=None, **kwargs
 
 
 def run_setup(function: run_command, *args, required=True, **kwargs):
-    process['log_depth'] += 1
+    _process['log_depth'] += 1
     echo("Step: ", function.__name__)
-    if process['satisfied']:
+    if _process['satisfied']:
         try:
             result = function(*args, **kwargs)
         except Exception as err:
@@ -160,20 +162,20 @@ def run_setup(function: run_command, *args, required=True, **kwargs):
             result = False
 
         if not result and required:
-            process['satisfied'] = False
+            _process['satisfied'] = False
 
         echo("OK" if result else "Err!")
     else:
         echo('Unsatisfied! Abort')
-    process['log_depth'] -= 1
+    _process['log_depth'] -= 1
 
 
 def install_pacstrap(packages: list) -> bool:
-    if not process['pacman_refreshed']:
+    if not _process['pacman_refreshed']:
         run_command('pacman', ['-Sy'])
-        process['pacman_refreshed'] = True
+        _process['pacman_refreshed'] = True
 
-    run_command('pacstrap', [options['install']] + packages)
+    run_command('pacstrap', [_options['install']] + packages)
     return True
 
 
@@ -184,9 +186,9 @@ def remove_packages(packages: list) -> bool:
 
 
 def install_local_pacman(packages: list) -> bool:
-    if not process['pacman_refreshed']:
+    if not _process['pacman_refreshed']:
         run_command('pacman', ['-Sy'])
-        process['pacman_refreshed'] = True
+        _process['pacman_refreshed'] = True
 
     run_command('pacman', ['-S', '--noconfirm'] + packages)
     return True
@@ -200,9 +202,9 @@ def remove_local_packages(packages: list) -> bool:
 
 def install_pkgbuild(pkg: str, dependencies: list) -> bool:
     # DOES NOT deal with dependencies!
-    if not process['pkgbuild_ready']:
+    if not _process['pkgbuild_ready']:
         install_local_pacman(['git'])
-        process['pkgbuild_ready'] = True
+        _process['pkgbuild_ready'] = True
 
     dir = "/usr/local/tmp/adi/makepkg/"
     src_f = lambda name: "https://aur.archlinux.org/" + name + ".git"
@@ -222,43 +224,43 @@ def install_pkgbuild(pkg: str, dependencies: list) -> bool:
 
 def parse_options(argv: list) -> bool:
     try:
-        options['params'], options['arguments'] = getopt.getopt(argv, "c:i:s:",
-                                                                ['config=', 'install=', 'setup=', 'scripts='])
+        _options['params'], _options['arguments'] = getopt.getopt(argv, "c:i:s:",
+                                                                  ['config=', 'install=', 'setup=', 'scripts='])
     except getopt.GetoptError:
         echo("Invalid option")
 
-    for opt, arg in options['params']:
+    for opt, arg in _options['params']:
         arg = arg if arg[0] not in (' ') else arg[1:]
         if opt in ('-c', '--config'):
-            options['configFile'] = arg
+            _options['configFile'] = arg
         elif opt in ('-i', '--install'):
-            options['install'] = arg
+            _options['install'] = arg
         elif opt in ('-s', '--setup'):
-            process['first_setup'] = arg
+            _process['first_setup'] = arg
         elif opt in ('--scripts'):
-            process['needed_system_scripts'] = arg.split(',')
+            _process['needed_system_scripts'] = arg.split(',')
 
     return True
 
 
 def read_config() -> bool:
-    with open(options['configFile'], 'r') as file:
-        options['configData'] = json.load(file)
+    with open(_options['configFile'], 'r') as file:
+        _options['configData'] = json.load(file)
 
     return True
 
 
 def save_config(path: str = None) -> bool:
-    path = path if path else options['configFile']
+    path = path if path else _options['configFile']
     with open(path, 'w') as file:
-        json.dump(options['configData'], file)
+        json.dump(_options['configData'], file)
 
     return True
 
 
 def save_run(path: str) -> bool:
     with open(path, 'w') as file:
-        json.dump(options, file)
+        json.dump(_options, file)
 
     return True
 
@@ -267,7 +269,7 @@ def configure_filesystems() -> bool:
     swaps = []
     mounts = []
     rootmount = {}
-    partitions = options['configData']['hardware']['partitions']
+    partitions = _options['configData']['hardware']['partitions']
 
     for part in partitions:
         if part['dev']:
@@ -296,12 +298,12 @@ def configure_filesystems() -> bool:
     if not rootmount:
         raise Exception("No Root mountpoint was specified in config!")
 
-    run_command('mkdir', [options['install'], '-p'])
-    run_command('mount', [rootmount['mount_options'], rootmount['dev'], options['install'] + rootmount['mount']])
+    run_command('mkdir', [_options['install'], '-p'])
+    run_command('mount', [rootmount['mount_options'], rootmount['dev'], _options['install'] + rootmount['mount']])
 
     for mount in mounts:
-        run_command('mkdir', ['-p', options['install'] + mount['mount']])
-        run_command('mount', [mount['mount_options'], mount['dev'], options['install'] + mount['mount']])
+        run_command('mkdir', ['-p', _options['install'] + mount['mount']])
+        run_command('mount', [mount['mount_options'], mount['dev'], _options['install'] + mount['mount']])
 
     for swap in swaps:
         run_command('swapon', [swap['dev']])
@@ -310,26 +312,24 @@ def configure_filesystems() -> bool:
 
 
 def install_world() -> bool:
-    system = options['configData']['system']
+    install_pacstrap(_options['configData']['packages'])
 
-    install_pacstrap(options['configData']['packages'])
-
-    if system['bootloader']['install_bootloader']:
-        install_pacstrap([options['configData']['system']['bootloader']['used_bootloader']])
+    if _bootloader['install_bootloader']:
+        install_pacstrap([_bootloader['used_bootloader']])
     return True
 
 
 def install_kernel() -> bool:
     install_pacstrap([
-                         options['configData']['system']['initram'],
-                         options['configData']['system']['ucode']
-                     ] + [k['version'] for k in options['configData']['system']['kernels']]
+                         _system['initram'],
+                         _system['ucode']
+                     ] + [k['version'] for k in _system['kernels']]
                      )
     return True
 
 
 def install_aur() -> bool:
-    packages = options['configData']['aur_packages']
+    packages = _options['configData']['aur_packages']
     for pkg in packages:
         pkgname = pkg['name']
         pkgdeps = pkg['deps']
@@ -344,16 +344,15 @@ def install_aur() -> bool:
 
 
 def configure_world() -> bool:
-    system = options['configData']['system']
-    run_chroot('timedatectl', ['set-timezone', system['systemd']['timezone']])
-    run_chroot('timedatectl', ['set-ntp', system['systemd']['ntp']])
-    run_chroot('hostnamectl', ['set-hostname', system['systemd']['hostname']])
+    run_chroot('timedatectl', ['set-timezone', _system['systemd']['timezone']])
+    run_chroot('timedatectl', ['set-ntp', _system['systemd']['ntp']])
+    run_chroot('hostnamectl', ['set-hostname', _system['systemd']['hostname']])
 
-    run_command('echo', ['-e', '\"{}\"'.format('\\n'.join(system['systemd']['locales'])), '>',
-                         options['install'] + "/etc/locale.gen"])
+    run_command('echo', ['-e', '\"{}\"'.format('\\n'.join(_system['systemd']['locales'])), '>',
+                         _options['install'] + "/etc/locale.gen"])
     run_chroot('locale-gen', [])
-    run_chroot('localectl', ['set-locale', "LANG=" + system['systemd']['main_locale']], nofail=True)
-    run_command('genfstab', ["-U", options['install'], '>>', options['install'] + "/etc/fstab"])
+    run_chroot('localectl', ['set-locale', "LANG=" + _system['systemd']['main_locale']], nofail=True)
+    run_command('genfstab', ["-U", _options['install'], '>>', _options['install'] + "/etc/fstab"])
 
     echo("Configure ROOT password (safe UNIX passwd command used. Enter password Twice!):")
     run_chroot('passwd', ['root'], direct=True, attempts=2)
@@ -362,7 +361,7 @@ def configure_world() -> bool:
 
 
 def configure_userspace() -> bool:
-    users = options['configData']['system']['users']
+    users = _system['users']
     for user in users:
         home = ["-m"] if user['home'] else []
         groups = ["-G", ','.join(user['groups'])] if user['groups'] else []
@@ -373,68 +372,63 @@ def configure_userspace() -> bool:
             echo("Configure {}`s password (safe UNIX passwd command used. Enter password Twice!):".format(user['name']))
             run_chroot('passwd', [user['name']], direct=True, attempts=2)
 
-    install_pacstrap([options['configData']['system']['desktop'], options['configData']['system']['dm']])
-    run_chroot('systemctl', ['enable', options['configData']['system']['dm']])
+    install_pacstrap([_system['desktop'], _system['dm']])
+    run_chroot('systemctl', ['enable', _system['dm']])
 
-    if options['configData']['features']['hfp_ofono']:
-        process['needed_system_scripts'].append(script_hfp_ofono.__name__)
+    if _options['configData']['features']['hfp_ofono']:
+        _process['needed_system_scripts'].append(script_hfp_ofono.__name__)
 
     return True
 
 
 def configure_boot() -> bool:
-    echo("Currenlty supported image generators are: " + str(list(supported_initrams.keys())))
-    echo("Currenlty supported bootloaders are: " + str(list(supported_bootloaders.keys())))
+    echo("Currenlty supported image generators are: " + str(list(_known_initrams.keys())))
+    echo("Currenlty supported bootloaders are: " + str(list(_known_bootloaders.keys())))
 
-    system = options['configData']['system']
-    bootloader = system['bootloader']
-
-    if bootloader['install_bootloader']:
-        if (blname := bootloader['used_bootloader']) in supported_bootloaders.keys():
-            for cmd, args in supported_bootloaders[blname]['setup']:
+    if _bootloader['install_bootloader']:
+        if (blname := _bootloader['used_bootloader']) in _known_bootloaders.keys():
+            for cmd, args in _known_bootloaders[blname]['setup']:
                 run_chroot(cmd, args)
         else:
             echo("I have no idea what to do with this bootloader! You have to configure it and EFISTUB manually!")
 
-    if (ininame := system['initram']) in supported_initrams.keys():
-        for step, args in supported_initrams[ininame]['setup']:
+    if (ininame := _system['initram']) in _known_initrams.keys():
+        for step, args in _known_initrams[ininame]['setup']:
             run_setup(step, *args)
 
-    if bootloader['uki']['use_uki']:
+    if _bootloader['uki']['use_uki']:
         run_setup(uki_efistub)
 
     return True
 
 
 def uki_efistub() -> bool:
-    system = options['configData']['system']
-    bootloader = system['bootloader']
 
-    if (ininame := system['initram']) in supported_initrams.keys():
-        for step, args in supported_initrams[ininame]['uki_setup']:
+    if (ininame := _system['initram']) in _known_initrams.keys():
+        for step, args in _known_initrams[ininame]['uki_setup']:
             run_setup(step, *args)
 
-        for kern_data in system['kernels']:
+        for kern_data in _system['kernels']:
             kernel = kern_data['version']
-            kernelpath = supported_initrams[ininame]['kern'](kernel)
+            kernelpath = _known_initrams[ininame]['kern'](kernel)
             cmdline = kern_data['cmdline']
-            initram = supported_initrams[ininame]['img'](kernel)
-            ucode = supported_ucodes[system['ucode']] if system['ucode'] in supported_ucodes.keys() else None
+            initram = _known_initrams[ininame]['img'](kernel)
+            ucode = _known_ucodes[_system['ucode']] if _system['ucode'] in _known_ucodes.keys() else None
 
-            run_command('mkdir', ['-p', options['install'] + bootloader['uki']['gen_dest']])
-            run_command('echo', ['\"{}\"'.format(cmdline), '>', options['install'] + '/etc/kernel/cmdline-' + kernel])
+            run_command('mkdir', ['-p', _options['install'] + _bootloader['uki']['gen_dest']])
+            run_command('echo', ['\"{}\"'.format(cmdline), '>', _options['install'] + '/etc/kernel/cmdline-' + kernel])
 
             if ucode:
                 run_command('cat',
-                            [ucode, initram, '>', ''.join(initram.split('.')[:-1]) + "-" + system['ucode'] + '.img'])
-                initram_ucode = ''.join(initram.split('.')[:-1]) + "-" + system['ucode'] + '.img'
-                ukipath = options['install'] + bootloader['uki']['gen_dest'] + "/" + kernel + ".efi"
+                            [ucode, initram, '>', ''.join(initram.split('.')[:-1]) + "-" + _system['ucode'] + '.img'])
+                initram_ucode = ''.join(initram.split('.')[:-1]) + "-" + _system['ucode'] + '.img'
+                ukipath = _options['install'] + _bootloader['uki']['gen_dest'] + "/" + kernel + ".efi"
 
             uki_params = [
                 '--add-section .osrel="{}/usr/lib/os-release" --change-section-vma .osrel=0x20000'.format(
-                    options['install']),
+                    _options['install']),
                 '--add-section .cmdline="{}/etc/kernel/cmdline-{}" --change-section-vma .cmdline=0x30000'.format(
-                    options['install'], kernel),
+                    _options['install'], kernel),
                 '--add-section .linux="{}" --change-section-vma .linux=0x2000000'.format(kernelpath),
                 '--add-section .initrd="{}" --change-section-vma .initrd=0x3000000'.format(initram_ucode),
                 '"/usr/lib/systemd/boot/efi/linuxx64.efi.stub" "{}"'.format(ukipath)
@@ -443,8 +437,8 @@ def uki_efistub() -> bool:
             run_command('rm', [ukipath], nofail=True)
             run_command('objcopy', uki_params)
 
-        if bootloader['uki']['add_hook']:
-            process['needed_system_scripts'].append(script_booster_uki.__name__)
+        if _bootloader['uki']['add_hook']:
+            _process['needed_system_scripts'].append(script_booster_uki.__name__)
     else:
         echo("I Have ho idea what to do with {} initram generator!".format(ininame))
 
@@ -454,33 +448,33 @@ def uki_efistub() -> bool:
 def save_configuration() -> bool:
     echo("Configuraton and system-descripting files are stored in /usr/local/share/adi")
     run_command('mkdir', ['-p', '/usr/local/share/adi/'])
-    run_command('mkdir', ['-p', options['install'] + '/usr/local/share/adi/'])
+    run_command('mkdir', ['-p', _options['install'] + '/usr/local/share/adi/'])
     run_setup(save_run, '/usr/local/share/adi/your_system.json')
     run_setup(save_config, '/usr/local/share/adi/your_config.json')
-    run_setup(save_run, options['install'] + '/usr/local/share/adi/your_system.json')
-    run_setup(save_config, options['install'] + '/usr/local/share/adi/your_config.json')
+    run_setup(save_run, _options['install'] + '/usr/local/share/adi/your_system.json')
+    run_setup(save_config, _options['install'] + '/usr/local/share/adi/your_config.json')
 
     return True
 
 
 def scripts() -> bool:
-    echo("Current scripts queue: " + str(process['needed_system_scripts']))
-    for script in set(process['needed_system_scripts']):
+    echo("Current scripts queue: " + str(_process['needed_system_scripts']))
+    for script in set(_process['needed_system_scripts']):
         run_setup(eval(script))
-        options['installed_system_scripts'].append(script)
+        _options['installed_system_scripts'].append(script)
     return True
 
 
 def script_booster_uki() -> bool:
     echo("UKI Generation script will be installed to /usr/local/share/adi/scripts")
     echo("UKI Generation Pacman Hook will be installed to /etc/pacman.d/hooks")
-    process['needed_script_packages'] += ['python', 'binutils', 'systemd']
+    _process['needed_script_packages'] += ['python', 'binutils', 'systemd']
 
-    run_command('mkdir', ['-p', options['install'] + "/usr/local/share/adi/scripts"])
-    run_command('mkdir', ['-p', options['install'] + "/etc/pacman.d/hooks"])
-    run_command('cp', ['-f', 'hooks/99-adi-uki.hook', options['install'] + "/etc/pacman.d/hooks/"])
-    run_command('cp', ['-f', 'scripts/uki', options['install'] + "/usr/local/share/adi/scripts/"])
-    run_command('chmod', ['+x', options['install'] + "/usr/local/share/adi/scripts/uki"])
+    run_command('mkdir', ['-p', _options['install'] + "/usr/local/share/adi/scripts"])
+    run_command('mkdir', ['-p', _options['install'] + "/etc/pacman.d/hooks"])
+    run_command('cp', ['-f', 'hooks/99-adi-uki.hook', _options['install'] + "/etc/pacman.d/hooks/"])
+    run_command('cp', ['-f', 'scripts/uki', _options['install'] + "/usr/local/share/adi/scripts/"])
+    run_command('chmod', ['+x', _options['install'] + "/usr/local/share/adi/scripts/uki"])
     return True
 
 
@@ -490,14 +484,10 @@ def script_hfp_ofono() -> bool:
 
 
 def script_packages() -> bool:
-    echo("Additional packages will be installed: " + str(process['needed_script_packages']))
-    packages = list(set(process['needed_script_packages']) - set(options['configData']['packages']))
+    echo("Additional packages will be installed: " + str(_process['needed_script_packages']))
+    packages = list(set(_process['needed_script_packages']) - set(_options['configData']['packages']))
     install_pacstrap(packages)
-    options['installed_script_packages'] += packages
-    return True
-
-
-def setup_devtests() -> bool:
+    _options['installed_script_packages'] += packages
     return True
 
 
@@ -506,14 +496,14 @@ if __name__ == "__main__":
     run_setup(read_config)
 
     try:
-        setup_first_index = process['setup_chain'].index(process['first_setup'])
+        setup_first_index = _process['setup_chain'].index(_process['first_setup'])
     except ValueError:
         echo("No such chain! Will start from first setup!")
         setup_first_index = 0
 
-    echo("Current setup chain: " + str(process['setup_chain'][setup_first_index:]))
+    echo("Current setup chain: " + str(_process['setup_chain'][setup_first_index:]))
 
     time.sleep(5)
 
-    for setup in process['setup_chain'][setup_first_index:]:
+    for setup in _process['setup_chain'][setup_first_index:]:
         run_setup(eval(setup))

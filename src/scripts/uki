@@ -13,7 +13,7 @@ while line := input():
         targets.append('linux'+kver)
 
 
-supported_initrams = {
+_known_initrams = {
     'booster': {
         'img': lambda kern: '/boot/booster-'+kern+'.img',
         'kern': lambda kern: '/boot/vmlinuz-'+kern
@@ -24,7 +24,7 @@ supported_initrams = {
     }
 }
 
-supported_ucodes = {
+_known_ucodes = {
     'intel-ucode': '/boot/intel-ucode.img',
     'amd-ucode': '/boot/amd-ucode.img',
 }
@@ -44,34 +44,34 @@ def run_command(cmd: str, args: list, nofail=False) -> int:
 
 
 with open('/usr/local/share/adi/your_system.json', 'r') as file:
-    options = json.load(file)
+    _options = json.load(file)
 
-system = options['configData']['system']
+_system = _options['configData']['system']
 
-initram = system['initram']
-ucode = system['ucode']
-uki = system['bootloader']['uki']['use_uki']
-ukipath = system['bootloader']['uki']['gen_dest']
+initram = _system['initram']
+ucode = _system['ucode']
+uki = _system['bootloader']['uki']['use_uki']
+ukipath = _system['bootloader']['uki']['gen_dest']
 
 if not uki:
     print("Could not perform EFISTUB UKI Transaction with use_uki={}".format(uki))
     exit(0)
 
-if initram in supported_initrams.keys():
-    initrampath_f = supported_initrams[initram]['img']
-    kernelpath_f = supported_initrams[initram]['kern']
+if initram in _known_initrams.keys():
+    initrampath_f = _known_initrams[initram]['img']
+    kernelpath_f = _known_initrams[initram]['kern']
 else:
     print("Could not perform EFISTUB for {} image generator".format(initram))
     exit(1)
 
 ucodepath_f = ''
-if ucode in supported_ucodes.keys():
-    ucodepath_f = supported_ucodes[ucode]
+if ucode in _known_ucodes.keys():
+    ucodepath_f = _known_ucodes[ucode]
 else:
     print("Could not add Microcode for {}".format(ucode))
 
 
-for kernel_data in options['configData']['system']['kernels']:
+for kernel_data in _options['configData']['system']['kernels']:
     kernel = kernel_data['version']
     if kernel in targets:
         kernelpath = kernelpath_f(kernel)
