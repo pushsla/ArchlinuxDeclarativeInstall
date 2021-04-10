@@ -85,9 +85,6 @@ def run_command(cmd: str, args: list, nofail=False, direct=False, attempts=1) ->
     process['log_depth'] += 1
     args = list(filter(lambda x: x != "", args))
     echo('EXEC: ', cmd + ' ' + ' '.join(args))
-    process['log_depth'] -= 1
-    return 0
-
     total_attempts = attempts
     while True:
         if not direct:
