@@ -18,6 +18,10 @@ supported_initrams = {
         'img': lambda kern: '/boot/booster-'+kern+'.img',
         'kern': lambda kern: '/boot/vmlinuz-'+kern
     },
+    'mkinitcpio': {
+        'img': lambda kern: '/boot/initramfs-'+kern+'.img',
+        'kern': lambda kern: '/boot/vmlinuz'+kern
+    }
 }
 
 supported_ucodes = {

@@ -5,6 +5,31 @@ import getopt
 import subprocess
 import time
 
+supported_bootloaders = {
+    'refind': {
+        'install': ['refind-install', []]
+    }
+}
+
+supported_initrams = {
+    'booster': {
+        'img': lambda kern: '/boot/booster-'+kern+'.img',
+        'kern': lambda kern: '/boot/vmlinuz-'+kern,
+        'setup': [],  # [[setup_name, [arg1, arg2...]], [setup_name, [a1, a2...]]]
+        'uki_setup': []  # [[setup_name, [arg1, arg2...]], [setup_name, [a1, a2...]]]
+    },
+    'mkinitcpio': {
+        'img': lambda kern: '/boot/initramfs-'+kern+'.img',
+        'kern': lambda kern: '/boot/vmlinuz'+kern,
+        'setup': [],  # [[setup_name, [arg1, arg2...]], [setup_name, [a1, a2...]]]
+        'uki_setup': []  # [[setup_name, [arg1, arg2...]], [setup_name, [a1, a2...]]]
+    }
+}
+
+supported_ucodes = {
+    'intel-ucode': '/boot/intel-ucode.img',
+    'amd-ucode': '/boot/amd-ucode.img',
+}
 
 process = {
     'logfile': 'adi.log',
@@ -297,64 +322,63 @@ def configure_boot() -> bool:
     bootloader = system['bootloader']
 
     if bootloader['install_bootloader']:
-        if bootloader['used_bootloader'] == "refind":
-            run_chroot('refind-install', [])
+        if blname := bootloader['used_bootloader'] in supported_bootloaders.keys():
+            cmd, args = supported_bootloaders[blname]
+            run_chroot(cmd, args)
         else:
             echo("I have no idea what to do with this bootloader! You have to configure it and EFISTUB manually!")
 
-    if system['initram'] == 'booster':
-        run_setup(boot_booster)
-    else:
-        echo("I have no idea what to do with this initrd generator! You have to configure it and EFISTUB manually!")
+    if ininame := system['initram'] in supported_initrams.keys():
+        for step, args in supported_initrams[ininame]['setup']:
+            run_setup(step, *args)
+
+    if system['uki']['use_uki']:
+        run_setup(uki_efistub)
 
     return True
 
 
-def uki_efistub(kernel: str, kernelpath: str, cmdline: str, initram: str, ucode: str = None) -> bool:
+def uki_efistub() -> bool:
     system = options['configData']['system']
     bootloader = system['bootloader']
 
-    if bootloader['uki']['use_uki']:
-        run_command('mkdir', ['-p', options['install'] + bootloader['uki']['gen_dest']])
-        run_command('echo', ['\"{}\"'.format(cmdline), '>', options['install'] + '/etc/kernel/cmdline-' + kernel])
+    if ininame := system['initram'] in supported_initrams.keys():
+        for step, args in supported_initrams[ininame]['uki_setup']:
+            run_setup(step, *args)
 
-        if ucode:
-            run_command('cat', [ucode, initram, '>', ''.join(initram.split('.')[:-1]) + "-" + system['ucode'] + '.img'])
-            initram_ucode = ''.join(initram.split('.')[:-1]) + "-" + system['ucode'] + '.img'
-            ukipath = options['install']+bootloader['uki']['gen_dest'] + "/" + kernel + ".efi"
+        for kern_data in system['kernels']:
+            kernel = kern_data['version']
+            kernelpath = supported_initrams[ininame]['kern'](kernel)
+            cmdline = kern_data['cmdline']
+            initram = supported_initrams[ininame]['img'](kernel)
+            ucode = supported_ucodes[system['ucode']] if system['ucode'] in supported_ucodes.keys() else None
 
-        uki_params = [
-            '--add-section .osrel="{}/usr/lib/os-release" --change-section-vma .osrel=0x20000'.format(options['install']),
-            '--add-section .cmdline="{}/etc/kernel/cmdline-{}" --change-section-vma .cmdline=0x30000'.format(options['install'], kernel),
-            '--add-section .linux="{}" --change-section-vma .linux=0x2000000'.format(kernelpath),
-            '--add-section .initrd="{}" --change-section-vma .initrd=0x3000000'.format(initram_ucode),
-            '"/usr/lib/systemd/boot/efi/linuxx64.efi.stub" "{}"'.format(ukipath)
-        ]
+            run_command('mkdir', ['-p', options['install'] + bootloader['uki']['gen_dest']])
+            run_command('echo', ['\"{}\"'.format(cmdline), '>', options['install'] + '/etc/kernel/cmdline-' + kernel])
 
-        run_command('rm', [ukipath], nofail=True)
-        run_command('objcopy', uki_params)
+            if ucode:
+                run_command('cat', [ucode, initram, '>', ''.join(initram.split('.')[:-1]) + "-" + system['ucode'] + '.img'])
+                initram_ucode = ''.join(initram.split('.')[:-1]) + "-" + system['ucode'] + '.img'
+                ukipath = options['install'] + bootloader['uki']['gen_dest'] + "/" + kernel + ".efi"
+
+            uki_params = [
+                '--add-section .osrel="{}/usr/lib/os-release" --change-section-vma .osrel=0x20000'.format(
+                    options['install']),
+                '--add-section .cmdline="{}/etc/kernel/cmdline-{}" --change-section-vma .cmdline=0x30000'.format(
+                    options['install'], kernel),
+                '--add-section .linux="{}" --change-section-vma .linux=0x2000000'.format(kernelpath),
+                '--add-section .initrd="{}" --change-section-vma .initrd=0x3000000'.format(initram_ucode),
+                '"/usr/lib/systemd/boot/efi/linuxx64.efi.stub" "{}"'.format(ukipath)
+            ]
+
+            run_command('rm', [ukipath], nofail=True)
+            run_command('objcopy', uki_params)
+
         if bootloader['uki']['add_hook']:
             process['needed_system_scripts'].append(script_booster_uki.__name__)
     else:
-        echo("Its OK, but I can only do unified kernel image trick. You have to configure EFISTUB manually then...")
+        echo("I Have ho ide what to do with {} initram generator!".format(ininame))
 
-    return True
-
-
-def boot_booster() -> bool:
-    system = options['configData']['system']
-    # Not needed because of booster hook
-    #run_chroot('/usr/share/libalpm/scripts/booster-install', ['<<<', "usr/lib/modules/$(uname -r)/vmlinuz"])
-    ucodepath = options['install']+"/boot/" + system['ucode'] + '.img' if system['ucode'] else None
-
-    if system['bootloader']['uki']['use_uki']:
-        for kern in system['kernels']:
-            run_setup(uki_efistub,
-                      kern['version'],
-                      options['install']+"/boot/vmlinuz-"+kern['version'],
-                      kern['cmdline'],
-                      options['install']+'/boot/booster-{}.img'.format(kern['version']),
-                      ucode=ucodepath)
     return True
 
 
