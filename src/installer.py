@@ -7,7 +7,7 @@ import time
 
 supported_bootloaders = {
     'refind': {
-        'install': ['refind-install', []]
+        'install': [('refind-install', [])]  # [setup1, setup2,,,] setup: (command, [*args])
     }
 }
 
@@ -15,14 +15,14 @@ supported_initrams = {
     'booster': {
         'img': lambda kern: '/boot/booster-'+kern+'.img',
         'kern': lambda kern: '/boot/vmlinuz-'+kern,
-        'setup': [],  # [[setup_name, [arg1, arg2...]], [setup_name, [a1, a2...]]]
-        'uki_setup': []  # [[setup_name, [arg1, arg2...]], [setup_name, [a1, a2...]]]
+        'setup': [],  # [(setup_name, [arg1, arg2...]), (setup_name, [a1, a2...])]
+        'uki_setup': []  # [(setup_name, [arg1, arg2...]), (setup_name, [a1, a2...])]
     },
     'mkinitcpio': {
         'img': lambda kern: '/boot/initramfs-'+kern+'.img',
         'kern': lambda kern: '/boot/vmlinuz'+kern,
-        'setup': [],  # [[setup_name, [arg1, arg2...]], [setup_name, [a1, a2...]]]
-        'uki_setup': []  # [[setup_name, [arg1, arg2...]], [setup_name, [a1, a2...]]]
+        'setup': [],  # [(setup_name, [arg1, arg2...]), (setup_name, [a1, a2...])]
+        'uki_setup': []  # [(setup_name, [arg1, arg2...]), (setup_name, [a1, a2...])]
     }
 }
 
@@ -323,8 +323,8 @@ def configure_boot() -> bool:
 
     if bootloader['install_bootloader']:
         if blname := bootloader['used_bootloader'] in supported_bootloaders.keys():
-            cmd, args = supported_bootloaders[blname]
-            run_chroot(cmd, args)
+            for cmd, args in supported_bootloaders[blname]:
+                run_chroot(cmd, args)
         else:
             echo("I have no idea what to do with this bootloader! You have to configure it and EFISTUB manually!")
 
