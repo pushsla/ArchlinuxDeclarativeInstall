@@ -13,14 +13,14 @@ supported_bootloaders = {
 
 supported_initrams = {
     'booster': {
-        'img': lambda kern: '/boot/booster-'+kern+'.img',
-        'kern': lambda kern: '/boot/vmlinuz-'+kern,
+        'img': lambda kern: '/boot/booster-' + kern + '.img',
+        'kern': lambda kern: '/boot/vmlinuz-' + kern,
         'setup': [],  # [(setup_name, [arg1, arg2...]), (setup_name, [a1, a2...])]
         'uki_setup': []  # [(setup_name, [arg1, arg2...]), (setup_name, [a1, a2...])]
     },
     'mkinitcpio': {
-        'img': lambda kern: '/boot/initramfs-'+kern+'.img',
-        'kern': lambda kern: '/boot/vmlinuz'+kern,
+        'img': lambda kern: '/boot/initramfs-' + kern + '.img',
+        'kern': lambda kern: '/boot/vmlinuz' + kern,
         'setup': [],  # [(setup_name, [arg1, arg2...]), (setup_name, [a1, a2...])]
         'uki_setup': []  # [(setup_name, [arg1, arg2...]), (setup_name, [a1, a2...])]
     }
@@ -36,18 +36,20 @@ process = {
     'log_depth': 0,
     'satisfied': True,
     'first_setup': 'configure_filesystems',
-    'pkgbuild_ready': False,
     'pacman_refreshed': False,
+    'pkgbuild_ready': False,
     'setup_chain': [
         'configure_filesystems',
         'install_world',
         'install_kernel',
+        'install_aur',
         'configure_userspace',
         'configure_world',
         'configure_boot',
         'save_configuration',
         'scripts',
-        'script_packages'
+        'script_packages',
+        'setup_devtests',
     ],
     'needed_system_scripts': [],
     'needed_script_packages': [],
@@ -67,25 +69,32 @@ options = {
 
 def log(line) -> None:
     with open(process['logfile'], 'a') as log:
-        log.write('  ' * process['log_depth']+line+"\n")
+        log.write('  ' * process['log_depth'] + line + "\n")
 
 
 def echo(*args, **kwargs) -> None:
-    log('  ' * process['log_depth']+' '.join(args))
+    log('  ' * process['log_depth'] + ' '.join(args))
     print('  ' * process['log_depth'], *args, **kwargs)
 
 
 def read(prompt: str) -> str:
-    answer = input('  ' * process['log_depth']+prompt)
-    log(prompt+" "+answer)
+    answer = input('  ' * process['log_depth'] + prompt)
+    log(prompt + " " + answer)
     return answer
 
 
-def run_command(cmd: str, args: list, nofail=False, direct=False, stdin: str = None, timeout=600, attempts=1) -> int:
+def run_command(cmd: str, args: list, user=None, nofail=False, direct=False, stdin: str = None, timeout=600,
+                attempts=1) -> int:
     process['log_depth'] += 1
     args = list(filter(lambda x: x != "", args))
-    echo('EXEC: ', cmd + ' ' + ' '.join(args))
     total_attempts = attempts
+
+    if user:
+        command = "sudo --user=" + user + " " + ' '.join([cmd] + args)
+    else:
+        command = ' '.join([cmd] + args)
+
+    echo('EXEC: ', command)
 
     stdin_pipe = None
     if stdin:
@@ -96,20 +105,22 @@ def run_command(cmd: str, args: list, nofail=False, direct=False, stdin: str = N
             if not direct:
                 with open(process['logfile'], 'a') as log:
                     log.write("<CommandOutput>\n")
-                    p = subprocess.Popen(' '.join([cmd] + args), shell=True, stdin=stdin_pipe, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    p = subprocess.Popen(command, shell=True, stdin=stdin_pipe, stdout=subprocess.PIPE,
+                                         stderr=subprocess.PIPE, encoding='utf-8')
                     output, err = p.communicate(input=stdin, timeout=timeout)
-                    log.write(output.decode('utf-8'))
-                    log.write("\n<Error>\n"+err.decode('utf-8')+"</Error>\n")
+                    log.write(output)
+                    log.write("\n<Error>\n" + err + "</Error>\n")
                     if err:
-                        print(err.decode('utf-8'))
+                        print(err)
                     log.write("\n</CommandOutput>\n")
             else:
-                p = subprocess.Popen(' '.join([cmd] + args), shell=True, stdin=stdin_pipe)
+                p = subprocess.Popen(command, shell=True, stdin=stdin_pipe, encoding='utf-8')
                 p.communicate(input=stdin, timeout=timeout)
         except subprocess.TimeoutExpired:
             p.kill()
 
-        result = p.returncode if p.returncode else -1
+        result = p.returncode if p.returncode else 0
+        echo("  RET: {}".format(result))
 
         if result == 0:
             break
@@ -124,12 +135,18 @@ def run_command(cmd: str, args: list, nofail=False, direct=False, stdin: str = N
     return result
 
 
-def run_chroot(cmd: str, args: list, **kwargs) -> int:
+def run_chroot(cmd: str, args: list, user=None, **kwargs) -> int:
+    if user:
+        return run_command("arch-chroot", [options['install'], 'sudo', '--user=' + user, cmd] + args, **kwargs)
     return run_command("arch-chroot", [options['install'], cmd] + args, **kwargs)
 
 
-def run_chdir(path: str, cmd: str, args: list, **kwargs) -> int:
-    return run_command("cd", [path, '&&', cmd] + args, **kwargs)
+def run_chdir(path: str, cmd: str, args: list, chroot=False, user=None, **kwargs) -> int:
+    if chroot:
+        return run_chroot("sh", ['-c', '"', 'cd', path, '&&', cmd] + args + ['"'], user=user, **kwargs)
+    if user:
+        return run_command("sudo", ['--user=' + user, 'sh', '-c', '"', 'cd', path, '&&', cmd, *args, '"'], **kwargs)
+    return run_command("cd", [path, '&&', cmd] + args, user=user, **kwargs)
 
 
 def run_setup(function: run_command, *args, required=True, **kwargs):
@@ -160,36 +177,53 @@ def install_pacstrap(packages: list) -> bool:
     return True
 
 
+def remove_packages(packages: list) -> bool:
+    for pkg in packages:
+        run_chroot('pacman', ['-Rsn', '--noconfirm', pkg], nofail=True)
+    return True
+
+
 def install_local_pacman(packages: list) -> bool:
     if not process['pacman_refreshed']:
         run_command('pacman', ['-Sy'])
         process['pacman_refreshed'] = True
 
-    run_command('pacman', ['-S', '--noconfirm']+packages)
+    run_command('pacman', ['-S', '--noconfirm'] + packages)
     return True
 
 
-def install_pkgbuild(packages: list) -> bool:
+def remove_local_packages(packages: list) -> bool:
+    for pkg in packages:
+        run_command('pacman', ['-Rsn', '--noconfirm', pkg], nofail=True)
+    return True
+
+
+def install_pkgbuild(pkg: str, dependencies: list) -> bool:
+    # DOES NOT deal with dependencies!
     if not process['pkgbuild_ready']:
         install_local_pacman(['git'])
-        run_command('useradd', ['-G wheel adi'])
-        run_command('passwd', ['adi'], stdin='adi\nadi')
         process['pkgbuild_ready'] = True
 
-    build_path = options['install']+"/tmp/adi/BUILD/"
-    aur_f = lambda pkgname: "https://aur.archlinux.org/"+pkgname+".git"
+    dir = "/usr/local/tmp/adi/makepkg/"
+    src_f = lambda name: "https://aur.archlinux.org/" + name + ".git"
 
-    run_command('mkdir', ['-p', build_path])
-    for pkg in packages:
-        run_command('git', ['clone', aur_f(pkg), build_path])
-        run_chdir(build_path+pkg, 'sudo', ['-u', 'asi', 'makepkg -si'], stdin='adi')
+    install_pacstrap(dependencies)
+
+    run_command('mkdir', ['-p', dir])
+    run_command('git', ['clone', src_f(pkg), dir + pkg])
+    run_command('chmod', ['-R', '777', dir + pkg])
+    if run_chdir(dir + pkg, 'makepkg', ['-d'], user="nobody", nofail=True, chroot=True) == 0:
+        run_chroot('pacman', ['-U', dir + pkg + "/*.pkg.*"])
+    else:
+        echo("Package was not installed due MAKEPKG FAIL")
 
     return True
 
 
 def parse_options(argv: list) -> bool:
     try:
-        options['params'], options['arguments'] = getopt.getopt(argv, "c:i:s:", ['config=', 'install=', 'setup=','scripts='])
+        options['params'], options['arguments'] = getopt.getopt(argv, "c:i:s:",
+                                                                ['config=', 'install=', 'setup=', 'scripts='])
     except getopt.GetoptError:
         echo("Invalid option")
 
@@ -276,20 +310,36 @@ def configure_filesystems() -> bool:
 
 
 def install_world() -> bool:
-    run_command('pacman', ['-Sy'])
+    system = options['configData']['system']
+
     install_pacstrap(options['configData']['packages'])
 
-    if options['configData']['system']['bootloader']['install_bootloader']:
+    if system['bootloader']['install_bootloader']:
         install_pacstrap([options['configData']['system']['bootloader']['used_bootloader']])
     return True
 
 
 def install_kernel() -> bool:
     install_pacstrap([
-        options['configData']['system']['initram'],
-        options['configData']['system']['ucode']
-    ]+[k['version'] for k in options['configData']['system']['kernels']]
-    )
+                         options['configData']['system']['initram'],
+                         options['configData']['system']['ucode']
+                     ] + [k['version'] for k in options['configData']['system']['kernels']]
+                     )
+    return True
+
+
+def install_aur() -> bool:
+    packages = options['configData']['aur_packages']
+    for pkg in packages:
+        pkgname = pkg['name']
+        pkgdeps = pkg['deps']
+        pkgmake = pkg['make_deps']
+        rm_make = pkg['remove_make_deps']
+
+        install_pkgbuild(pkgname, pkgdeps+pkgmake)
+        if rm_make:
+            remove_packages(pkgmake)
+
     return True
 
 
@@ -333,8 +383,8 @@ def configure_userspace() -> bool:
 
 
 def configure_boot() -> bool:
-    echo("Currenlty supported image generators are: "+str(list(supported_initrams.keys())))
-    echo("Currenlty supported bootloaders are: "+str(list(supported_bootloaders.keys())))
+    echo("Currenlty supported image generators are: " + str(list(supported_initrams.keys())))
+    echo("Currenlty supported bootloaders are: " + str(list(supported_bootloaders.keys())))
 
     system = options['configData']['system']
     bootloader = system['bootloader']
@@ -375,7 +425,8 @@ def uki_efistub() -> bool:
             run_command('echo', ['\"{}\"'.format(cmdline), '>', options['install'] + '/etc/kernel/cmdline-' + kernel])
 
             if ucode:
-                run_command('cat', [ucode, initram, '>', ''.join(initram.split('.')[:-1]) + "-" + system['ucode'] + '.img'])
+                run_command('cat',
+                            [ucode, initram, '>', ''.join(initram.split('.')[:-1]) + "-" + system['ucode'] + '.img'])
                 initram_ucode = ''.join(initram.split('.')[:-1]) + "-" + system['ucode'] + '.img'
                 ukipath = options['install'] + bootloader['uki']['gen_dest'] + "/" + kernel + ".efi"
 
@@ -425,9 +476,9 @@ def script_booster_uki() -> bool:
     echo("UKI Generation Pacman Hook will be installed to /etc/pacman.d/hooks")
     process['needed_script_packages'] += ['python', 'binutils', 'systemd']
 
-    run_command('mkdir', ['-p', options['install']+"/usr/local/share/adi/scripts"])
+    run_command('mkdir', ['-p', options['install'] + "/usr/local/share/adi/scripts"])
     run_command('mkdir', ['-p', options['install'] + "/etc/pacman.d/hooks"])
-    run_command('cp', ['-f', 'hooks/99-adi-uki.hook', options['install']+"/etc/pacman.d/hooks/"])
+    run_command('cp', ['-f', 'hooks/99-adi-uki.hook', options['install'] + "/etc/pacman.d/hooks/"])
     run_command('cp', ['-f', 'scripts/uki', options['install'] + "/usr/local/share/adi/scripts/"])
     run_command('chmod', ['+x', options['install'] + "/usr/local/share/adi/scripts/uki"])
     return True
@@ -443,6 +494,10 @@ def script_packages() -> bool:
     packages = list(set(process['needed_script_packages']) - set(options['configData']['packages']))
     install_pacstrap(packages)
     options['installed_script_packages'] += packages
+    return True
+
+
+def setup_devtests() -> bool:
     return True
 
 
