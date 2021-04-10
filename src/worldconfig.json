@@ -50,7 +50,7 @@
         "add_hook": true
       },
       "used_bootloader": "refind",
-      "install_bootloader": true
+      "install_bootloader": false
     },
     "systemd": {
       "timezone": "Europe/Moscow",

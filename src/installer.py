@@ -85,6 +85,9 @@ def run_command(cmd: str, args: list, nofail=False, direct=False, attempts=1) ->
     process['log_depth'] += 1
     args = list(filter(lambda x: x != "", args))
     echo('EXEC: ', cmd + ' ' + ' '.join(args))
+    process['log_depth'] -= 1
+    return 0
+
     total_attempts = attempts
     while True:
         if not direct:
@@ -377,12 +380,13 @@ def uki_efistub() -> bool:
         if bootloader['uki']['add_hook']:
             process['needed_system_scripts'].append(script_booster_uki.__name__)
     else:
-        echo("I Have ho ide what to do with {} initram generator!".format(ininame))
+        echo("I Have ho idea what to do with {} initram generator!".format(ininame))
 
     return True
 
 
 def save_configuration() -> bool:
+    echo("Configuraton and system-descripting files are stored in /usr/local/share/adi")
     run_command('mkdir', ['-p', '/usr/local/share/adi/'])
     run_command('mkdir', ['-p', options['install'] + '/usr/local/share/adi/'])
     run_setup(save_run, '/usr/local/share/adi/your_system.json')
@@ -394,6 +398,7 @@ def save_configuration() -> bool:
 
 
 def scripts() -> bool:
+    echo("Current scripts queue: " + str(process['needed_system_scripts']))
     for script in set(process['needed_system_scripts']):
         run_setup(eval(script))
         options['installed_system_scripts'].append(script)
@@ -401,6 +406,8 @@ def scripts() -> bool:
 
 
 def script_booster_uki() -> bool:
+    echo("UKI Generation script will be installed to /usr/local/share/adi/scripts")
+    echo("UKI Generation Pacman Hook will be installed to /etc/pacman.d/hooks")
     process['needed_script_packages'] += ['python', 'binutils', 'systemd']
 
     run_command('mkdir', ['-p', options['install']+"/usr/local/share/adi/scripts"])
@@ -417,6 +424,7 @@ def script_hfp_ofono() -> bool:
 
 
 def script_packages() -> bool:
+    echo("Additional packages will be installed: " + str(process['needed_script_packages']))
     packages = list(set(process['needed_script_packages']) - set(options['configData']['packages']))
     install_pacstrap(packages)
     options['installed_script_packages'] += packages
