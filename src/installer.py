@@ -15,16 +15,16 @@ _known_bootloaders = {
 # How to deal with some initram generators and where to find files
 _known_initrams = {
     'booster': {
-        'img': lambda kern: '/boot/booster-' + kern + '.img',
-        'kern': lambda kern: '/boot/vmlinuz-' + kern,
+        'img': lambda kern: '/boot/booster-' + kern + '.img',  # where to find image file
+        'kern': lambda kern: '/boot/vmlinuz-' + kern,  # where to find kernel file
         'setup': [],  # [(setup_name, [arg1, arg2...]), (setup_name, [a1, a2...])]
         'uki_setup': []  # [(setup_name, [arg1, arg2...]), (setup_name, [a1, a2...])]
     },
     'mkinitcpio': {
         'img': lambda kern: '/boot/initramfs-' + kern + '.img',
         'kern': lambda kern: '/boot/vmlinuz' + kern,
-        'setup': [],  # [(setup_name, [arg1, arg2...]), (setup_name, [a1, a2...])]
-        'uki_setup': []  # [(setup_name, [arg1, arg2...]), (setup_name, [a1, a2...])]
+        'setup': [],
+        'uki_setup': []
     }
 }
 
@@ -38,12 +38,12 @@ _known_ucodes = {
 # What to do, what have been done, what are we ready/not for
 _process = {
     'logfile': 'adi.log',
-    'log_depth': 0,
-    'satisfied': True,
-    'first_setup': 'configure_filesystems',
+    'log_depth': 0,  # for pretty output look
+    'satisfied': True,  # setup chain integrity
+    'first_setup': 'configure_filesystems',  # chain starts from this step (can be modified by exec cmdline)
     'pacman_refreshed': False,
     'pkgbuild_ready': False,
-    'setup_chain': [
+    'setup_chain': [  # setup steps chain
         'configure_filesystems',
         'install_world',
         'install_kernel',
@@ -55,21 +55,21 @@ _process = {
         'scripts',
         'script_packages',
     ],
-    'needed_system_scripts': [],
-    'needed_script_packages': [],
+    'needed_system_scripts': [],  # scripts that setup steps asked to install
+    'needed_script_packages': [],  # packages needed for scripts ^
 }
 
 # Static installation/configuration data
 # Where to install, what has been really installed and how program have been run
 _options = {
-    'install': "/mntarch",
-    'root_uuid': "",
-    'installed_system_scripts': [],
-    'installed_script_packages': [],
-    'params': [],
-    'arguments': [],
-    'configFile': "worldconfig.json",
-    'configData': {}
+    'install': "/mntarch",  # installation mount
+    'root_uuid': "",  # UUID of root partition fixme is not used yet
+    'installed_system_scripts': [],  # scripts actually installed in system
+    'installed_script_packages': [],  # packages, needed by installed scripts and installed in system
+    'params': [],  # cmdline params
+    'arguments': [],  # params ^ values
+    'configFile': "worldconfig.json", # path to install config
+    'configData': {}  # deserialized content of install config
 }
 
 # Shortcuts for frequently used parts of _options
