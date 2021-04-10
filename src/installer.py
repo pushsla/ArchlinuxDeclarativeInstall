@@ -7,7 +7,7 @@ import time
 
 supported_bootloaders = {
     'refind': {
-        'install': [('refind-install', [])]  # [setup1, setup2,,,] setup: (command, [*args])
+        'setup': [('refind-install', [])]  # [setup1, setup2,,,] setup: (command, [*args])
     }
 }
 
@@ -157,21 +157,6 @@ def install_local_pacman(packages: list) -> bool:
     return True
 
 
-def install_pkgbuild(package_name: str) -> bool:
-    if not process['pkgbuild_ready']:
-        install_local_pacman(['git'])
-        process['pkgbuild_ready'] = True
-
-    run_command('mkdir', ['-p', '/tmp/adi/build/'])
-    run_command('mkdir', ['-p', options['install']+'/tmp/adi/build/'])
-    run_command('git', ['clone', "https://aur.archlinux.org/{}.git".format(package_name), '/tmp/adi/build/'])
-    run_command('sudo', ['-u', 'nobody', 'cd', '/tmp/adi/build/'+package_name, '&&', 'makepkg', '-s'])
-    run_command('cp', ['/tmp/adi/build/'+package_name+"*.tar.*", options['install']+'/tmp/adi/build/'])
-    echo("Now you have to run pacman -U <package_name> and then exit the shell")
-    run_chroot('cd', ['/tmp/adi/build/'], direct=True)
-    return True
-
-
 def parse_options(argv: list) -> bool:
     try:
         options['params'], options['arguments'] = getopt.getopt(argv, "c:i:s:", ['config=', 'install=', 'setup=','scripts='])
@@ -318,24 +303,24 @@ def configure_userspace() -> bool:
 
 
 def configure_boot() -> bool:
-    echo("Currenlty supported image generators are: booster")
-    echo("Currenlty supported bootloaders are: refind")
+    echo("Currenlty supported image generators are: "+str(list(supported_initrams.keys())))
+    echo("Currenlty supported bootloaders are: "+str(list(supported_bootloaders.keys())))
 
     system = options['configData']['system']
     bootloader = system['bootloader']
 
     if bootloader['install_bootloader']:
-        if blname := bootloader['used_bootloader'] in supported_bootloaders.keys():
-            for cmd, args in supported_bootloaders[blname]:
+        if (blname := bootloader['used_bootloader']) in supported_bootloaders.keys():
+            for cmd, args in supported_bootloaders[blname]['setup']:
                 run_chroot(cmd, args)
         else:
             echo("I have no idea what to do with this bootloader! You have to configure it and EFISTUB manually!")
 
-    if ininame := system['initram'] in supported_initrams.keys():
+    if (ininame := system['initram']) in supported_initrams.keys():
         for step, args in supported_initrams[ininame]['setup']:
             run_setup(step, *args)
 
-    if system['uki']['use_uki']:
+    if bootloader['uki']['use_uki']:
         run_setup(uki_efistub)
 
     return True
@@ -345,7 +330,7 @@ def uki_efistub() -> bool:
     system = options['configData']['system']
     bootloader = system['bootloader']
 
-    if ininame := system['initram'] in supported_initrams.keys():
+    if (ininame := system['initram']) in supported_initrams.keys():
         for step, args in supported_initrams[ininame]['uki_setup']:
             run_setup(step, *args)
 
