@@ -81,31 +81,42 @@ def read(prompt: str) -> str:
     return answer
 
 
-def run_command(cmd: str, args: list, nofail=False, direct=False, attempts=1) -> int:
+def run_command(cmd: str, args: list, nofail=False, direct=False, stdin: str = None, timeout=600, attempts=1) -> int:
     process['log_depth'] += 1
     args = list(filter(lambda x: x != "", args))
     echo('EXEC: ', cmd + ' ' + ' '.join(args))
     total_attempts = attempts
+
+    stdin_pipe = None
+    if stdin:
+        stdin_pipe = subprocess.PIPE
+
     while True:
-        if not direct:
-            with open(process['logfile'], 'a') as log:
-                log.write("<CommandOutput>\n")
-                p = subprocess.Popen(' '.join([cmd] + args), shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                result = p.wait()
-                output, err = p.communicate()
-                log.write(output.decode('utf-8'))
-                log.write("\n<Error>\n"+err.decode('utf-8')+"</Error>\n")
-                if err:
-                    print(err.decode('utf-8'))
-                log.write("\n</CommandOutput>\n")
-        else:
-            result = subprocess.Popen(' '.join([cmd] + args), shell=True).wait()
+        try:
+            if not direct:
+                with open(process['logfile'], 'a') as log:
+                    log.write("<CommandOutput>\n")
+                    p = subprocess.Popen(' '.join([cmd] + args), shell=True, stdin=stdin_pipe, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    output, err = p.communicate(input=stdin, timeout=timeout)
+                    log.write(output.decode('utf-8'))
+                    log.write("\n<Error>\n"+err.decode('utf-8')+"</Error>\n")
+                    if err:
+                        print(err.decode('utf-8'))
+                    log.write("\n</CommandOutput>\n")
+            else:
+                p = subprocess.Popen(' '.join([cmd] + args), shell=True, stdin=stdin_pipe)
+                p.communicate(input=stdin, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            p.kill()
+
+        result = p.returncode if p.returncode else -1
+
         if result == 0:
             break
         elif attempts > 1:
             echo("Failed {}/{} attempts. Retrying...".format(attempts, total_attempts))
             attempts -= 1
-        elif not nofail:
+        elif nofail:
             break
         else:
             raise Exception('  ' * process['log_depth'] + "Command Error!")
@@ -113,8 +124,12 @@ def run_command(cmd: str, args: list, nofail=False, direct=False, attempts=1) ->
     return result
 
 
-def run_chroot(cmd: str, args: list, nofail=False, direct=False, attempts=1) -> (int, str):
-    run_command("arch-chroot", [options['install'], cmd] + args, nofail=nofail, direct=direct, attempts=attempts)
+def run_chroot(cmd: str, args: list, **kwargs) -> int:
+    return run_command("arch-chroot", [options['install'], cmd] + args, **kwargs)
+
+
+def run_chdir(path: str, cmd: str, args: list, **kwargs) -> int:
+    return run_command("cd", [path, '&&', cmd] + args, **kwargs)
 
 
 def run_setup(function: run_command, *args, required=True, **kwargs):
@@ -151,6 +166,24 @@ def install_local_pacman(packages: list) -> bool:
         process['pacman_refreshed'] = True
 
     run_command('pacman', ['-S', '--noconfirm']+packages)
+    return True
+
+
+def install_pkgbuild(packages: list) -> bool:
+    if not process['pkgbuild_ready']:
+        install_local_pacman(['git'])
+        run_command('useradd', ['-G wheel adi'])
+        run_command('passwd', ['adi'], stdin='adi\nadi')
+        process['pkgbuild_ready'] = True
+
+    build_path = options['install']+"/tmp/adi/BUILD/"
+    aur_f = lambda pkgname: "https://aur.archlinux.org/"+pkgname+".git"
+
+    run_command('mkdir', ['-p', build_path])
+    for pkg in packages:
+        run_command('git', ['clone', aur_f(pkg), build_path])
+        run_chdir(build_path+pkg, 'sudo', ['-u', 'asi', 'makepkg -si'], stdin='adi')
+
     return True
 
 
