@@ -131,39 +131,46 @@ def run_command(cmd: str, args: list, user=None, nofail=False, direct=False, std
     if stdin:
         stdin_pipe = subprocess.PIPE
 
+    # If process runs withput direct options - write stdin/out/err to log
+    stdout_pipe = None
+    stderr_pipe = None
+    if not direct:
+        stdout_pipe = subprocess.PIPE
+        stderr_pipe = subprocess.PIPE
+
     # Because attempts. Guaranteed that will not be infinity by 'if' statements
     while True:
+        p = subprocess.Popen(command, shell=True, stdin=stdin_pipe, stdout=stdout_pipe, stderr=stderr_pipe, encoding='utf-8')
         # for process Timeout exception handling
         try:
+            output, err = p.communicate(input=stdin, timeout=timeout)
             # Because for direct=True we do not write a log
-            # fixme get rid of this IF
             if not direct:
                 with open(_process['logfile'], 'a') as log:
-                    log.write("<CommandOutput>\n")
-                    p = subprocess.Popen(command, shell=True, stdin=stdin_pipe, stdout=subprocess.PIPE,
-                                         stderr=subprocess.PIPE, encoding='utf-8')
-                    output, err = p.communicate(input=stdin, timeout=timeout)
-                    log.write(output)
-                    log.write("\n<Error>\n" + err + "</Error>\n")
+                    if output:
+                        log.write("<CommandOutput>\n")
+                        log.write(output)
+                        log.write("\n</CommandOutput>\n")
                     if err:
+                        log.write("\n<Error>\n" + err + "</Error>\n")
                         print(err)
-                    log.write("\n</CommandOutput>\n")
-            else:
-                p = subprocess.Popen(command, shell=True, stdin=stdin_pipe, encoding='utf-8')
-                p.communicate(input=stdin, timeout=timeout)
         except subprocess.TimeoutExpired:
             p.kill()
 
         # If no returncode, set it as 0
+        # We do it because we can
+        # fixme
         result = p.returncode if p.returncode else 0
         echo("  RET: {}".format(result))
 
-        # Cycle end guarantee
+        # Cycle end its end guarantee
         if result == 0:
             break
         elif attempts > 1:
             echo("Failed {}/{} attempts. Retrying...".format(attempts, total_attempts))
             attempts -= 1
+        # This check must be done after attempts > 1
+        # Because even with nofail=True if execution fails, we will retry it
         elif nofail:
             break
         else:
