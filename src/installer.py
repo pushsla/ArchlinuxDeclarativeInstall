@@ -347,7 +347,7 @@ def install_pkgbuild(pkg: str, dependencies: list) -> bool:
         _process['pkgbuild_ready'] = True
 
     # Building is performed in installation fs
-    dir = "/usr/local/tmp/adi/makepkg/"
+    dir = _options['install']+"/usr/local/tmp/adi/makepkg/"
     src_f = lambda name: "https://aur.archlinux.org/" + name + ".git"
 
     install_pacstrap(dependencies)
@@ -356,7 +356,7 @@ def install_pkgbuild(pkg: str, dependencies: list) -> bool:
     run_command('git', ['clone', src_f(pkg), dir + pkg])
     run_command('chmod', ['-R', '777', dir + pkg])
     # if makepkg -d runs without fails we will pacman -U
-    if run_chdir(dir + pkg, 'makepkg', ['-d'], user="nobody", nofail=True, chroot=True) == 0:
+    if run_chdir(dir + pkg, 'makepkg', ['-d'], user="nobody", nofail=True) == 0:
         run_chroot('pacman', ['-U', dir + pkg + "/*.pkg.*"])
     else:
         echo("Package was not installed due MAKEPKG FAIL")
