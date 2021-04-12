@@ -69,12 +69,12 @@ _options = {
     'params': [],  # cmdline params
     'arguments': [],  # params ^ values
     'configFile': "worldconfig.json", # path to install config
-    'configData': {}  # deserialized content of install config
+    'configData': {} # deserialized content of install config
 }
 
 # Shortcuts for frequently used parts of _options
-_system = _options['configData']['system']
-_bootloader = _system['bootloader']
+_system = None
+_bootloader = None
 
 
 # Write log to file
@@ -97,7 +97,7 @@ def read(prompt: str) -> str:
 
 
 def run_command(cmd: str, args: list, user=None, nofail=False, direct=False, stdin: str = None, timeout=600,
-                attempts=1) -> int:
+                attempts=1, env=None) -> int:
     """
     Every command running in OS must be runned through this function.
 
@@ -111,6 +111,7 @@ def run_command(cmd: str, args: list, user=None, nofail=False, direct=False, std
     :param stdin: sting that will be putted to process stdin (ignored if direct=True)
     :param timeout: process timeout before force kill
     :param attempts: if process fails (returncode != 0 or timeout) it can be restarted N-1 times
+    :param env: special enviromnent variables, format "GOCACHE=off XWAYLAND=false" etc
     :return: returncode of process. If, for some reason, process gives no returncode, will return 0
     """
     # For pretty log, echo, read look
@@ -123,6 +124,10 @@ def run_command(cmd: str, args: list, user=None, nofail=False, direct=False, std
         command = "sudo --user=" + user + " " + ' '.join([cmd] + args)
     else:
         command = ' '.join([cmd] + args)
+
+    # if env string set
+    if env:
+        command = "env " + env + " " + command
 
     echo('EXEC: ', command)
 
@@ -346,18 +351,20 @@ def install_pkgbuild(pkg: str, dependencies: list) -> bool:
         install_local_pacman(['git'])
         _process['pkgbuild_ready'] = True
 
-    # Building is performed in installation fs
-    dir = _options['install']+"/usr/local/tmp/adi/makepkg/"
+    # Building is performed in installation fs under chroot
+    dir_rel = "/usr/local/tmp/adi/makepkg"
+    dir = _options['install'] + dir_rel
     src_f = lambda name: "https://aur.archlinux.org/" + name + ".git"
 
-    install_pacstrap(dependencies)
+    install_pacstrap(dependencies+['base-devel'])
 
     run_command('mkdir', ['-p', dir])
+    run_command('rm', ['-rf', dir + pkg])
     run_command('git', ['clone', src_f(pkg), dir + pkg])
     run_command('chmod', ['-R', '777', dir + pkg])
     # if makepkg -d runs without fails we will pacman -U
-    if run_chdir(dir + pkg, 'makepkg', ['-d'], user="nobody", nofail=True) == 0:
-        run_chroot('pacman', ['-U', dir + pkg + "/*.pkg.*"])
+    if run_chdir(dir_rel + pkg, 'makepkg', ['-d'], user="nobody", nofail=True, chroot=True, env="GOCACHE="+dir+pkg) == 0:
+        run_chroot('pacman', ['-U', dir_rel + pkg + "/*.pkg.*"])
     else:
         echo("Package was not installed due MAKEPKG FAIL")
 
@@ -642,15 +649,16 @@ def uki_efistub() -> bool:
     :return: True if all fine
     """
     if (ininame := _system['initram']) in _known_initrams.keys():
+        install_local_pacman('binutils')
         for step, args in _known_initrams[ininame]['uki_setup']:
             run_setup(step, *args)
 
         for kern_data in _system['kernels']:
             kernel = kern_data['version']
-            kernelpath = _known_initrams[ininame]['kern'](kernel)
+            kernelpath = _options['install']+_known_initrams[ininame]['kern'](kernel)
             cmdline = kern_data['cmdline']
-            initram = _known_initrams[ininame]['img'](kernel)
-            ucode = _known_ucodes[_system['ucode']] if _system['ucode'] in _known_ucodes.keys() else None
+            initram = _options['install']+_known_initrams[ininame]['img'](kernel)
+            ucode = _options['install']+_known_ucodes[_system['ucode']] if _system['ucode'] in _known_ucodes.keys() else None
 
             run_command('mkdir', ['-p', _options['install'] + _bootloader['uki']['gen_dest']])
             run_command('echo', ['\"{}\"'.format(cmdline), '>', _options['install'] + '/etc/kernel/cmdline-' + kernel])
@@ -765,6 +773,11 @@ def script_packages() -> bool:
 if __name__ == "__main__":
     run_setup(parse_options, sys.argv[1:])
     run_setup(read_config)
+
+    # Shortcuts for frequently used parts of _options
+    _system = _options['configData']['system']
+    _bootloader = _system['bootloader']
+
 
     # User is able to start process not from beginning for some reason
     try:
